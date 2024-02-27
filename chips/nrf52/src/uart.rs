@@ -439,7 +439,7 @@ impl<'a> Uarte<'a> {
     }
 }
 
-impl<'a> uart::Transmit<'a> for Uarte<'a> {
+impl<'a> uart::Transmit<'a, true, 1> for Uarte<'a> {
     fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
         self.tx_client.set(client);
     }

@@ -91,6 +91,7 @@
 
 #![warn(unreachable_pub)]
 #![no_std]
+#![feature(trait_upcasting)]
 
 /// Kernel major version.
 ///

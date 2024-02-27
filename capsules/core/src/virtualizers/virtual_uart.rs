@@ -52,6 +52,7 @@ use kernel::collections::list::{List, ListLink, ListNode};
 use kernel::deferred_call::{DeferredCall, DeferredCallClient};
 use kernel::hil::uart;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
+use kernel::utilities::packet_buffer::{PacketBuffer, PacketBufferMut};
 use kernel::ErrorCode;
 
 pub const RX_BUF_LEN: usize = 64;
@@ -66,10 +67,10 @@ pub struct MuxUart<'a> {
     deferred_call: DeferredCall,
 }
 
-impl<'a> uart::TransmitClient for MuxUart<'a> {
+impl<'a, const CONTIGUOUS: bool> uart::TransmitClient<CONTIGUOUS, 1> for MuxUart<'a> {
     fn transmitted_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: &'static PacketBufferMut,
         tx_len: usize,
         rcode: Result<(), ErrorCode>,
     ) {
