@@ -68,13 +68,22 @@ pub enum Error {
 pub trait Uart<'a>: Configure + Transmit<'a> + Receive<'a> {}
 pub trait UartData<'a>: Transmit<'a> + Receive<'a> {}
 pub trait UartAdvanced<'a>: Configure + Transmit<'a> + ReceiveAdvanced<'a> {}
-pub trait Client: ReceiveClient + TransmitClient {}
+pub trait Client<const CONTIGUOUS: bool, const HDR: usize>:
+    ReceiveClient + TransmitClient<CONTIGUOUS, HDR>
+{
+}
 
 // Provide blanket implementations for all trait groups
 impl<'a, T: Configure + Transmit<'a> + Receive<'a>> Uart<'a> for T {}
 impl<'a, T: Transmit<'a> + Receive<'a>> UartData<'a> for T {}
 impl<'a, T: Configure + Transmit<'a> + ReceiveAdvanced<'a>> UartAdvanced<'a> for T {}
-impl<T: ReceiveClient + TransmitClient> Client for T {}
+impl<
+        const CONTIGUOUS: bool,
+        const HDR: usize,
+        T: ReceiveClient + TransmitClient<CONTIGUOUS, HDR>,
+    > Client<CONTIGUOUS, HDR> for T
+{
+}
 
 /// Trait for configuring a UART.
 pub trait Configure {
@@ -87,10 +96,10 @@ pub trait Configure {
     fn configure(&self, params: Parameters) -> Result<(), ErrorCode>;
 }
 
-pub trait Transmit<'a> {
+pub trait Transmit<'a, const CONTIGUOUS: bool = true, const HDR: usize = 0> {
     /// Set the transmit client, which will be called when transmissions
     /// complete.
-    fn set_transmit_client(&self, client: &'a dyn TransmitClient);
+    fn set_transmit_client(&self, client: &'a dyn TransmitClient<CONTIGUOUS, HDR>);
 
     /// Transmit a buffer of data. On completion, `transmitted_buffer`
     /// in the `TransmitClient` will be called.  If the `Result<(), ErrorCode>`
@@ -117,6 +126,7 @@ pub trait Transmit<'a> {
     /// `transmit_buffer` or `transmit_word` operation will return BUSY.
     fn transmit_buffer(
         &self,
+        //AMALIA: this will be a PacketBuffer continuous
         tx_buffer: &'static mut [u8],
         tx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])>;
@@ -220,7 +230,7 @@ pub trait Receive<'a> {
 
 /// Trait implemented by a UART transmitter to receive callbacks when
 /// operations complete.
-pub trait TransmitClient {
+pub trait TransmitClient<const CONTIGUOUS: bool, const HRD: usize> {
     /// A call to `Transmit::transmit_word` completed. The `Result<(), ErrorCode>`
     /// indicates whether the word was successfully transmitted. A call
     /// to `transmit_word` or `transmit_buffer` made within this callback
