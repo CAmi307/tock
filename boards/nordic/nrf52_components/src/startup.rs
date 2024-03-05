@@ -180,20 +180,23 @@ impl UartPins {
 
 /// Uart chanel representation depends on whether USB debugging is
 /// enabled.
-pub enum UartChannel<'a> {
+// pub enum UartChannel<'a> {
+pub enum UartChannel {
     Pins(UartPins),
-    Rtt(components::segger_rtt::SeggerRttMemoryRefs<'a>),
+    // Rtt(components::segger_rtt::SeggerRttMemoryRefs<'a>),
 }
 
 pub struct UartChannelComponent {
-    uart_channel: UartChannel<'static>,
+    // uart_channel: UartChannel<'static>,
+    uart_channel: UartChannel,
     mux_alarm: &'static MuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
     uarte0: &'static nrf52::uart::Uarte<'static>,
 }
 
 impl UartChannelComponent {
     pub fn new(
-        uart_channel: UartChannel<'static>,
+        // uart_channel: UartChannel<'static>,
+        uart_channel: UartChannel,
         mux_alarm: &'static MuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
         uarte0: &'static nrf52::uart::Uarte<'static>,
     ) -> Self {
@@ -208,11 +211,11 @@ impl UartChannelComponent {
 impl Component for UartChannelComponent {
     type StaticInput = (
         &'static mut MaybeUninit<VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>>,
-        &'static mut MaybeUninit<
-            SeggerRtt<'static, VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>>,
-        >,
+        // &'static mut MaybeUninit<
+        //     SeggerRtt<'static, VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>>,
+        // >,
     );
-    type Output = &'static dyn kernel::hil::uart::Uart<'static>;
+    type Output = &'static dyn kernel::hil::uart::Uart<'static, 0, 0>;
 
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
         match self.uart_channel {
@@ -226,11 +229,10 @@ impl Component for UartChannelComponent {
                     )
                 };
                 self.uarte0
-            }
-            UartChannel::Rtt(rtt_memory) => {
-                components::segger_rtt::SeggerRttComponent::new(self.mux_alarm, rtt_memory)
-                    .finalize(s)
-            }
+            } // UartChannel::Rtt(rtt_memory) => {
+              //     components::segger_rtt::SeggerRttComponent::new(self.mux_alarm, rtt_memory)
+              //         .finalize(s)
+              // }
         }
     }
 }

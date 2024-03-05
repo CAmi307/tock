@@ -13,6 +13,7 @@ pub mod leasable_buffer;
 pub mod machine_register;
 pub mod math;
 pub mod mut_imut_buffer;
+pub mod packet_buffer;
 pub mod peripheral_management;
 pub mod single_thread_value;
 pub mod static_init;
