@@ -68,7 +68,7 @@ macro_rules! process_console_component_static {
 
 pub struct ProcessConsoleComponent<const COMMAND_HISTORY_LEN: usize, A: 'static + Alarm<'static>> {
     board_kernel: &'static kernel::Kernel,
-    uart_mux: &'static MuxUart<'static>,
+    uart_mux: &'static MuxUart<'static, 1, 0, 0>,
     alarm_mux: &'static MuxAlarm<'static, A>,
     process_printer: &'static dyn ProcessPrinter,
     reset_function: Option<fn() -> !>,
@@ -79,7 +79,7 @@ impl<const COMMAND_HISTORY_LEN: usize, A: 'static + Alarm<'static>>
 {
     pub fn new(
         board_kernel: &'static kernel::Kernel,
-        uart_mux: &'static MuxUart,
+        uart_mux: &'static MuxUart<1, 0, 0>,
         alarm_mux: &'static MuxAlarm<'static, A>,
         process_printer: &'static dyn ProcessPrinter,
         reset_function: Option<fn() -> !>,
@@ -135,7 +135,9 @@ impl<const COMMAND_HISTORY_LEN: usize, A: 'static + Alarm<'static>> Component
 
     fn finalize(self, static_buffer: Self::StaticInput) -> Self::Output {
         // Create virtual device for console.
-        let console_uart = static_buffer.1.write(UartDevice::new(self.uart_mux, true));
+        let console_uart = static_buffer
+            .1
+            .write(UartDevice::<1, 0>::new(self.uart_mux, true));
         console_uart.setup();
 
         // Get addresses of where the kernel is placed to enable additional

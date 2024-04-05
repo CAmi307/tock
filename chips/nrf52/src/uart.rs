@@ -15,11 +15,11 @@ use core::cmp::min;
 use cortex_m_semihosting::hprintln;
 use kernel::hil::uart;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
-use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
+use kernel::utilities::packet_buffer::{PacketBufferMut, PacketSliceMut};
 use kernel::utilities::registers::interfaces::{Readable, Writeable};
 use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite, WriteOnly};
-use kernel::utilities::{packet_buffer, StaticRef};
-use kernel::{debug, ErrorCode};
+use kernel::utilities::StaticRef;
+use kernel::ErrorCode;
 use nrf5x::pinmux;
 
 const UARTE_MAX_BUFFER_SIZE: u32 = 0xff;
@@ -164,9 +164,9 @@ register_bitfields! [u32,
 /// UARTE
 // It should never be instanced outside this module but because a static mutable reference to it
 // is exported outside this module it must be `pub`
-pub struct Uarte<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
+pub struct Uarte<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize> {
     registers: StaticRef<UarteRegisters>,
-    tx_client: OptionalCell<&'a dyn uart::TransmitClient<HEAD, TAIL>>,
+    tx_client: OptionalCell<&'a dyn uart::TransmitClient<HEAD_CLIENT, TAIL>>,
     // AMALIA: ultimu layer va tine un PacketSliceMut, restul vor tine PacketBufferMut
     tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_len: Cell<usize>,
@@ -183,10 +183,12 @@ pub struct UARTParams {
     pub baud_rate: u32,
 }
 
-impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
+impl<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize>
+    Uarte<'a, HEAD, TAIL, HEAD_CLIENT>
+{
     /// Constructor
     // This should only be constructed once
-    pub fn new(regs: StaticRef<UarteRegisters>) -> Uarte<'a, HEAD, TAIL> {
+    pub fn new(regs: StaticRef<UarteRegisters>) -> Uarte<'a, HEAD, TAIL, HEAD_CLIENT> {
         Uarte {
             registers: regs,
             tx_client: OptionalCell::empty(),
@@ -462,10 +464,10 @@ impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
     }
 }
 
-impl<'a, const HEAD: usize, const TAIL: usize> uart::Transmit<'a, HEAD, TAIL>
-    for Uarte<'a, HEAD, TAIL>
+impl<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize>
+    uart::Transmit<'a, HEAD, TAIL, HEAD_CLIENT> for Uarte<'a, HEAD, TAIL, HEAD_CLIENT>
 {
-    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient<HEAD, TAIL>) {
+    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient<HEAD_CLIENT, TAIL>) {
         self.tx_client.set(client);
     }
 
@@ -501,7 +503,9 @@ impl<'a, const HEAD: usize, const TAIL: usize> uart::Transmit<'a, HEAD, TAIL>
     }
 }
 
-impl<'a, const HEAD: usize, const TAIL: usize> uart::Configure for Uarte<'a, HEAD, TAIL> {
+impl<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize> uart::Configure
+    for Uarte<'a, HEAD, TAIL, HEAD_CLIENT>
+{
     fn configure(&self, params: uart::Parameters) -> Result<(), ErrorCode> {
         // These could probably be implemented, but are currently ignored, so
         // throw an error.
@@ -521,7 +525,9 @@ impl<'a, const HEAD: usize, const TAIL: usize> uart::Configure for Uarte<'a, HEA
     }
 }
 
-impl<'a, const HEAD: usize, const TAIL: usize> uart::Receive<'a> for Uarte<'a, HEAD, TAIL> {
+impl<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize> uart::Receive<'a>
+    for Uarte<'a, HEAD, TAIL, HEAD_CLIENT>
+{
     fn set_receive_client(&self, client: &'a dyn uart::ReceiveClient) {
         self.rx_client.set(client);
     }

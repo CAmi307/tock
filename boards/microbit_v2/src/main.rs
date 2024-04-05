@@ -95,7 +95,7 @@ pub struct MicroBit {
             nrf52::rtc::Rtc<'static>,
         >,
     >,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 1, 0>,
     gpio: &'static capsules_core::gpio::GPIO<'static, nrf52::gpio::GPIOPin<'static>>,
     led: &'static capsules_core::led::LedDriver<
         'static,

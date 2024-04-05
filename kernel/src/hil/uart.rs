@@ -66,31 +66,37 @@ pub enum Error {
     Aborted,
 }
 
-pub trait Uart<'a, const HEAD: usize = 0, const TAIL: usize = 0>:
-    Configure + Transmit<'a, HEAD, TAIL> + Receive<'a>
+pub trait Uart<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize>:
+    Configure + Transmit<'a, HEAD, TAIL, HEAD_CLIENT> + Receive<'a>
 {
 }
-pub trait UartData<'a, const HEAD: usize = 0, const TAIL: usize = 0>:
-    Transmit<'a, HEAD, TAIL> + Receive<'a>
+pub trait UartData<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize>:
+    Transmit<'a, HEAD, TAIL, HEAD_CLIENT> + Receive<'a>
 {
 }
-pub trait UartAdvanced<'a>: Configure + Transmit<'a> + ReceiveAdvanced<'a> {}
+pub trait UartAdvanced<'a>: Configure + Transmit<'a, 0, 0, 0> + ReceiveAdvanced<'a> {}
 pub trait Client: ReceiveClient + TransmitClient {}
 
 // Provide blanket implementations for all trait groups
 impl<
         'a,
-        T: Configure + Transmit<'a, HEAD, TAIL> + Receive<'a>,
+        T: Configure + Transmit<'a, HEAD, TAIL, HEAD_CLIENT> + Receive<'a>,
         const HEAD: usize,
         const TAIL: usize,
-    > Uart<'a, HEAD, TAIL> for T
+        const HEAD_CLIENT: usize,
+    > Uart<'a, HEAD, TAIL, HEAD_CLIENT> for T
 {
 }
-impl<'a, const HEAD: usize, const TAIL: usize, T: Transmit<'a, HEAD, TAIL> + Receive<'a>>
-    UartData<'a, HEAD, TAIL> for T
+impl<
+        'a,
+        const HEAD: usize,
+        const TAIL: usize,
+        const HEAD_CLIENT: usize,
+        T: Transmit<'a, HEAD, TAIL, HEAD_CLIENT> + Receive<'a>,
+    > UartData<'a, HEAD, TAIL, HEAD_CLIENT> for T
 {
 }
-impl<'a, T: Configure + Transmit<'a> + ReceiveAdvanced<'a>> UartAdvanced<'a> for T {}
+impl<'a, T: Configure + Transmit<'a, 0, 0, 0> + ReceiveAdvanced<'a>> UartAdvanced<'a> for T {}
 impl<T: ReceiveClient + TransmitClient> Client for T {}
 
 /// Trait for configuring a UART.
@@ -104,10 +110,10 @@ pub trait Configure {
     fn configure(&self, params: Parameters) -> Result<(), ErrorCode>;
 }
 
-pub trait Transmit<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
+pub trait Transmit<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize> {
     /// Set the transmit client, which will be called when transmissions
     /// complete.
-    fn set_transmit_client(&self, client: &'a dyn TransmitClient<HEAD, TAIL>);
+    fn set_transmit_client(&self, client: &'a dyn TransmitClient<HEAD_CLIENT, TAIL>);
 
     /// Transmit a buffer of data. On completion, `transmitted_buffer`
     /// in the `TransmitClient` will be called.  If the `Result<(), ErrorCode>`

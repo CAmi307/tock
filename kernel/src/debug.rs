@@ -385,14 +385,14 @@ macro_rules! debug_flush_queue {
 /// Wrapper type that we need a mutable reference to for the core::fmt::Write
 /// interface.
 pub struct DebugWriterWrapper {
-    dw: MapCell<&'static DebugWriter<0, 0>>,
+    dw: MapCell<&'static DebugWriter<1, 0>>,
 }
 
 /// Main type that we need an immutable reference to so we can share it with
 /// the UART provider and this debug module.
-pub struct DebugWriter<const HEAD: usize = 0, const TAIL: usize = 0> {
+pub struct DebugWriter<const HEAD: usize = 1, const TAIL: usize = 0, const HEAD_UARTE: usize = 0> {
     // What provides the actual writing mechanism.
-    uart: &'static dyn hil::uart::Transmit<'static, HEAD, TAIL>,
+    uart: &'static dyn hil::uart::Transmit<'static, HEAD, TAIL, HEAD>,
     // The buffer that is passed to the writing mechanism.
     output_buffer: OptionalCell<PacketBufferMut<HEAD, TAIL>>,
     // An internal buffer that is used to hold debug!() calls as they come in.
@@ -419,19 +419,21 @@ pub unsafe fn set_debug_writer_wrapper(debug_writer: &'static mut DebugWriterWra
 }
 
 impl DebugWriterWrapper {
-    pub fn new(dw: &'static DebugWriter<0, 0>) -> DebugWriterWrapper {
+    pub fn new(dw: &'static DebugWriter<1, 0>) -> DebugWriterWrapper {
         DebugWriterWrapper {
             dw: MapCell::new(dw),
         }
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize> DebugWriter<HEAD, TAIL> {
+impl<const HEAD: usize, const TAIL: usize, const HEAD_UARTE: usize>
+    DebugWriter<HEAD, TAIL, HEAD_UARTE>
+{
     pub fn new(
-        uart: &'static dyn hil::uart::Transmit<HEAD, TAIL>,
+        uart: &'static dyn hil::uart::Transmit<HEAD, TAIL, HEAD>,
         out_buffer: PacketBufferMut<HEAD, TAIL>,
         internal_buffer: &'static mut RingBuffer<'static, u8>,
-    ) -> DebugWriter<HEAD, TAIL> {
+    ) -> DebugWriter<HEAD, TAIL, HEAD_UARTE> {
         DebugWriter {
             uart: uart,
             output_buffer: OptionalCell::new(out_buffer),
@@ -491,6 +493,7 @@ impl<const HEAD: usize, const TAIL: usize> DebugWriter<HEAD, TAIL> {
                     let pb: PacketBufferMut<HEAD, TAIL> =
                         PacketBufferMut::<HEAD, TAIL>::new(out_packet_slice).unwrap();
                     if let Err((_err, buf)) = self.uart.transmit_buffer(pb, count) {
+                        // let new_pb = buf.reclaim_headroom::<HEAD>().unwrap();
                         self.output_buffer.set(buf);
                     } else {
                         self.output_buffer.clear();
@@ -513,8 +516,8 @@ impl<const HEAD: usize, const TAIL: usize> DebugWriter<HEAD, TAIL> {
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize> hil::uart::TransmitClient<HEAD, TAIL>
-    for DebugWriter<HEAD, TAIL>
+impl<const HEAD: usize, const TAIL: usize, const HEAD_UARTE: usize>
+    hil::uart::TransmitClient<HEAD, TAIL> for DebugWriter<HEAD, TAIL, HEAD_UARTE>
 {
     fn transmitted_buffer(
         &self,

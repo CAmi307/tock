@@ -23,11 +23,9 @@ pub const DRIVER_NUM: usize = crate::driver::NUM::LowLevelDebug as usize;
 
 pub struct LowLevelDebug<
     'u,
-    U: Transmit<'u, HEAD_TRANSMIT, TAIL_TRANSMIT>,
+    U: Transmit<'u, HEAD, TAIL, HEAD>,
     const HEAD: usize,
     const TAIL: usize,
-    const HEAD_TRANSMIT: usize,
-    const TAIL_TRANSMIT: usize,
 > {
     buffer: Cell<Option<PacketBufferMut<HEAD, TAIL>>>,
     grant: Grant<AppData, UpcallCount<0>, AllowRoCount<0>, AllowRwCount<0>>,
@@ -41,20 +39,14 @@ pub struct LowLevelDebug<
     uart: &'u U,
 }
 
-impl<
-        'u,
-        U: Transmit<'u, HEAD_TRANSMIT, TAIL_TRANSMIT>,
-        const HEAD: usize,
-        const TAIL: usize,
-        const HEAD_TRANSMIT: usize,
-        const TAIL_TRANSMIT: usize,
-    > LowLevelDebug<'u, U, HEAD, TAIL, HEAD_TRANSMIT, TAIL_TRANSMIT>
+impl<'u, U: Transmit<'u, HEAD, TAIL, HEAD>, const HEAD: usize, const TAIL: usize>
+    LowLevelDebug<'u, U, HEAD, TAIL>
 {
     pub fn new(
         buffer: PacketBufferMut<HEAD, TAIL>,
         uart: &'u U,
         grant: Grant<AppData, UpcallCount<0>, AllowRoCount<0>, AllowRwCount<0>>,
-    ) -> LowLevelDebug<'u, U, HEAD, TAIL, HEAD_TRANSMIT, TAIL_TRANSMIT> {
+    ) -> LowLevelDebug<'u, U, HEAD, TAIL> {
         LowLevelDebug {
             buffer: Cell::new(Some(buffer)),
             grant,
@@ -64,15 +56,8 @@ impl<
     }
 }
 
-impl<
-        'u,
-        U: Transmit<'u, HEAD_TRANSMIT, TAIL_TRANSMIT>,
-        const HEAD: usize,
-        const TAIL: usize,
-        const HEAD_TRANSMIT: usize,
-        const TAIL_TRANSMIT: usize,
-    > kernel::syscall::SyscallDriver
-    for LowLevelDebug<'u, U, HEAD, TAIL, HEAD_TRANSMIT, TAIL_TRANSMIT>
+impl<'u, U: Transmit<'u, HEAD, TAIL, HEAD>, const HEAD: usize, const TAIL: usize>
+    kernel::syscall::SyscallDriver for LowLevelDebug<'u, U, HEAD, TAIL>
 {
     fn command(
         &self,
@@ -98,13 +83,12 @@ impl<
 
 impl<
         'u,
-        U: Transmit<'u, HEAD_TRANSMIT, TAIL_TRANSMIT>,
+        U: Transmit<'u, HEAD, TAIL, HEAD>,
         const HEAD: usize,
         const TAIL: usize,
         const HEAD_TRANSMIT: usize,
         const TAIL_TRANSMIT: usize,
-    > TransmitClient<HEAD_TRANSMIT, TAIL_TRANSMIT>
-    for LowLevelDebug<'u, U, HEAD, TAIL, HEAD_TRANSMIT, TAIL_TRANSMIT>
+    > TransmitClient<HEAD_TRANSMIT, TAIL_TRANSMIT> for LowLevelDebug<'u, U, HEAD, TAIL>
 {
     fn transmitted_buffer(
         &self,
@@ -131,10 +115,8 @@ impl<
             let _ = self
                 .uart
                 .transmit_buffer(
-                    PacketBufferMut::<HEAD_TRANSMIT, TAIL_TRANSMIT>::new(
-                        PacketSliceMut::new(buffer).unwrap(),
-                    )
-                    .unwrap(),
+                    PacketBufferMut::<HEAD, TAIL>::new(PacketSliceMut::new(buffer).unwrap())
+                        .unwrap(),
                     MESSAGE.len(),
                 )
                 .map_err(|(_, returned_buffer)| {
@@ -172,14 +154,8 @@ impl<
 // Implementation details below
 // -----------------------------------------------------------------------------
 
-impl<
-        'u,
-        U: Transmit<'u, HEAD_TRANSMIT, TAIL_TRANSMIT>,
-        const HEAD: usize,
-        const TAIL: usize,
-        const HEAD_TRANSMIT: usize,
-        const TAIL_TRANSMIT: usize,
-    > LowLevelDebug<'u, U, HEAD, TAIL, HEAD_TRANSMIT, TAIL_TRANSMIT>
+impl<'u, U: Transmit<'u, HEAD, TAIL, HEAD>, const HEAD: usize, const TAIL: usize>
+    LowLevelDebug<'u, U, HEAD, TAIL>
 {
     // If the UART is not busy (the buffer is available), transmits the entry.
     // Otherwise, adds it to the app's queue.

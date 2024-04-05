@@ -119,6 +119,13 @@ pub struct PacketBufferMut<const HEAD: usize = 0, const TAIL: usize = 0> {
 impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
     #[inline(always)]
     pub fn new(inner: &'static mut dyn PacketBufferDyn) -> Option<Self> {
+        hprintln!(
+            "inner headroom {}, HEAD {}, inner tailroom {}, TAIL {}",
+            inner.headroom(),
+            HEAD,
+            inner.tailroom(),
+            TAIL
+        );
         if inner.headroom() >= HEAD && inner.tailroom() >= TAIL {
             Some(PacketBufferMut { inner })
         } else {
@@ -267,6 +274,7 @@ impl PacketSliceMut {
     // TODO: horribly unsafe, check and document safety!
     pub fn new<'a>(slice: &'a mut [u8]) -> Result<&'a mut PacketSliceMut, &'a mut [u8]> {
         if slice.len() < Self::DATA_SLICE.start {
+            hprintln!("PacketSliceMut new returned error");
             Err(slice)
         } else {
             // Write the slice's length into its first word:
@@ -409,6 +417,7 @@ impl PacketSliceMut {
 // }
 
 unsafe impl PacketBufferDyn for PacketSliceMut {
+    // TODO UPDATE API: fn payload_len(&self) -> usize {
     fn len(&self) -> usize {
         // hprintln!(
         //     "PB: len(): {} - {} - {}",
@@ -481,6 +490,11 @@ unsafe impl PacketBufferDyn for PacketSliceMut {
     }
 
     unsafe fn prepand_unchecked(&mut self, header: &[u8]) {
+        hprintln!(
+            "PB: old headroom is {}, new headroom is {}",
+            self.get_headroom(),
+            self.get_headroom().saturating_sub(header.len())
+        );
         self.set_headroom(self.get_headroom().saturating_sub(header.len()));
         self.data_slice_mut()[..header.len()].copy_from_slice(header);
     }

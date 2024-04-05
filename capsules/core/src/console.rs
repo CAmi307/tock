@@ -102,8 +102,8 @@ pub struct App {
     read_len: usize,
 }
 
-pub struct Console<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
-    uart: &'a dyn uart::UartData<'a, HEAD, TAIL>,
+pub struct Console<'a, const HEAD: usize = 1, const TAIL: usize = 0> {
+    uart: &'a dyn uart::UartData<'a, HEAD, TAIL, HEAD>,
     apps: Grant<
         App,
         UpcallCount<{ upcall::COUNT }>,
@@ -118,7 +118,7 @@ pub struct Console<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
 
 impl<'a, const HEAD: usize, const TAIL: usize> Console<'a, HEAD, TAIL> {
     pub fn new(
-        uart: &'a dyn uart::UartData<'a, HEAD, TAIL>,
+        uart: &'a dyn uart::UartData<'a, HEAD, TAIL, HEAD>,
         tx_buffer: PacketBufferMut<HEAD, TAIL>,
         rx_buffer: &'static mut [u8],
         grant: Grant<

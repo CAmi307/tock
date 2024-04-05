@@ -190,7 +190,7 @@ pub struct UartChannelComponent {
     // uart_channel: UartChannel<'static>,
     uart_channel: UartChannel,
     mux_alarm: &'static MuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
-    uarte0: &'static nrf52::uart::Uarte<'static>,
+    uarte0: &'static nrf52::uart::Uarte<'static, 0, 0, 1>,
 }
 
 impl UartChannelComponent {
@@ -198,7 +198,7 @@ impl UartChannelComponent {
         // uart_channel: UartChannel<'static>,
         uart_channel: UartChannel,
         mux_alarm: &'static MuxAlarm<'static, nrf52::rtc::Rtc<'static>>,
-        uarte0: &'static nrf52::uart::Uarte<'static>,
+        uarte0: &'static nrf52::uart::Uarte<'static, 0, 0, 1>,
     ) -> Self {
         Self {
             uart_channel,
@@ -215,7 +215,7 @@ impl Component for UartChannelComponent {
         //     SeggerRtt<'static, VirtualMuxAlarm<'static, nrf52::rtc::Rtc<'static>>>,
         // >,
     );
-    type Output = &'static dyn kernel::hil::uart::Uart<'static>;
+    type Output = &'static dyn kernel::hil::uart::Uart<'static, 0, 0, 1>;
 
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
         match self.uart_channel {

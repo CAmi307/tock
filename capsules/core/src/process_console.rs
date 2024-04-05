@@ -231,10 +231,10 @@ pub struct ProcessConsole<
     const COMMAND_HISTORY_LEN: usize,
     A: Alarm<'a>,
     C: ProcessManagementCapability,
-    const HEAD: usize = 0,
+    const HEAD: usize = 1,
     const TAIL: usize = 0,
 > {
-    uart: &'a dyn uart::UartData<'a>,
+    uart: &'a dyn uart::UartData<'a, HEAD, TAIL, HEAD>,
     alarm: &'a A,
     process_printer: &'a dyn ProcessPrinter,
     tx_in_progress: Cell<bool>,
@@ -450,7 +450,7 @@ impl<
     > ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C, HEAD, TAIL>
 {
     pub fn new(
-        uart: &'a dyn uart::UartData<'a>,
+        uart: &'a dyn uart::UartData<'a, HEAD, TAIL, HEAD>,
         alarm: &'a A,
         process_printer: &'a dyn ProcessPrinter,
         tx_buffer: PacketBufferMut<HEAD, TAIL>,
@@ -1115,7 +1115,7 @@ impl<
             self.tx_buffer.take().map(|buffer| {
                 let slice = buffer.downcast::<PacketSliceMut>().unwrap();
 
-                // TODO AMALIA: ask leon why we needed capacity here instead of len??
+                // TODO MEETING AMALIA: ask leon why we needed capacity here instead of len??
                 let len = cmp::min(bytes.len(), slice.capacity());
 
                 // hprintln!("PC: write_bytes: minimum between received bytes len: {} and packet_buffer len: {} is {}", bytes.len(), slice.capacity(), len);
