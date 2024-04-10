@@ -449,20 +449,25 @@ impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
     // Helper function used by both transmit_word and transmit_buffer
     fn setup_buffer_transmit(&self, buf: PacketBufferMut<HEAD, TAIL>) {
         let len = buf.payload().len();
-        // hprintln!(
-        //     "Setup buffer transmit: len {} - {} - {} and buffer {:?}",
-        //     buf.capacity(),
-        //     buf.headroom(),
-        //     buf.tailroom(),
-        //     buf.payload()
-        // );
+
+        let slice = buf.downcast::<PacketSliceMut>().unwrap();
+        hprintln!(
+            "Setup buffer transmit: capacity {} - headroom {} - tailroom {}. Total len {}",
+            slice.capacity(),
+            slice.headroom(),
+            slice.tailroom(),
+            // buf.payload(),
+            slice.len()
+        );
+        hprintln!("Buf: {:?}", slice.restore_inner_slice());
+
         // self.tx_remaining_bytes.set(tx_len);
         self.tx_remaining_bytes.set(len);
         // self.tx_len.set(tx_len);
         self.tx_len.set(len);
         self.offset.set(0);
         // self.tx_buffer.replace(buf).unwrap();
-        self.tx_buffer.replace(buf.downcast().unwrap());
+        self.tx_buffer.replace(slice);
         self.set_tx_dma_pointer_to_buffer();
 
         self.registers

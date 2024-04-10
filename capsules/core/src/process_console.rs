@@ -1094,7 +1094,11 @@ impl<
                 //     &buf.data_slice()[..10],
                 //     buf.len()
                 // );
-                let _ = self.uart.transmit_buffer(buffer, 1);
+
+                let header = [1u8; 1];
+                let increased_size_buf = buffer.restore_headroom::<1>().unwrap();
+                let new_buf = increased_size_buf.prepend::<HEAD, 1>(&header);
+                let _ = self.uart.transmit_buffer(new_buf, 1);
             });
             Ok(())
         }
@@ -1124,6 +1128,13 @@ impl<
                 // into the buffer only after the bytes allocated for the header
                 let len = cmp::min(bytes.len(), buffer.capacity() - buffer.headroom());
 
+                hprintln!(
+                    "PC: Capacity {} Headroom {} Tailroom {}",
+                    buffer.capacity(),
+                    buffer.headroom(),
+                    buffer.tailroom()
+                );
+
                 // Copy elements of `bytes` into `buffer`
                 hprintln!("PC: write_bytes: before copy buf {:?}", buffer.payload());
                 buffer.copy_from_slice_or_err(&bytes[..len]).unwrap();
@@ -1133,7 +1144,9 @@ impl<
                     buffer.payload()
                 );
 
-                let _ = self.uart.transmit_buffer(buffer, len);
+                let header = [1u8; 1];
+                let new_buf = buffer.prepend::<HEAD, 1>(&header);
+                let _ = self.uart.transmit_buffer(new_buf, len);
             });
             Ok(())
         }
@@ -1165,7 +1178,13 @@ impl<
                         // Removing the space allocated to the headroom, since we are writing bytes
                         // into the buffer only after the bytes allocated for the header
                         let txlen = cmp::min(qlen, txbuf.capacity() - txbuf.headroom());
-
+                        hprintln!(
+                            "Handle queue: Capacity {}, Headroom {}, Tailroom {}",
+                            txbuf.capacity(),
+                            txbuf.headroom(),
+                            txbuf.tailroom()
+                        );
+                        hprintln!("Handle queue: message: {:?}", &qbuf[..txlen]);
                         // Copy elements of the queue into the TX buffer.
                         // (txbuf[..txlen]).copy_from_slice(&qbuf[..txlen]);
 

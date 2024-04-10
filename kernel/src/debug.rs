@@ -497,6 +497,10 @@ impl<const HEAD: usize, const TAIL: usize> DebugWriter<HEAD, TAIL> {
                     // );
                     let pb: PacketBufferMut<HEAD, TAIL> =
                         PacketBufferMut::<HEAD, TAIL>::new(out_packet_slice).unwrap();
+
+                    // let header = [0u8; 1];
+                    // let increased_size_buf = pb.restore_headroom::<1>().unwrap();
+                    // let new_pb = increased_size_buf.prepend::<HEAD, 1>(&header);
                     if let Err((_err, buf)) = self.uart.transmit_buffer(pb, count) {
                         self.output_buffer.set(buf);
                     } else {

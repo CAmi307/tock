@@ -351,7 +351,7 @@ impl PacketSliceMut {
         usize::from_ne_bytes(length_slice.try_into().unwrap())
     }
 
-    fn restore_inner_slice<'a>(&'a self) -> &'a [u8] {
+    pub fn restore_inner_slice<'a>(&'a self) -> &'a [u8] {
         let length = self.get_inner_slice_length();
 
         // `get_inner_slice_length` does not keep a reference to the underlying

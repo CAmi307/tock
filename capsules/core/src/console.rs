@@ -47,8 +47,7 @@ use kernel::hil::uart;
 use kernel::processbuffer::{ReadableProcessBuffer, WriteableProcessBuffer};
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::{OptionalCell, TakeCell};
-use kernel::utilities::copy_slice::CopyOrErr;
-use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
+use kernel::utilities::packet_buffer::PacketBufferMut;
 use kernel::{ErrorCode, ProcessId};
 
 /// Syscall driver number.
@@ -219,7 +218,11 @@ impl<'a, const HEAD: usize, const TAIL: usize> Console<'a, HEAD, TAIL> {
                     .unwrap_or(0);
                 app.write_remaining -= transaction_len;
 
-                let _ = self.uart.transmit_buffer(tx_buffer, transaction_len);
+                let id = processid.id();
+                let header = id.to_ne_bytes();
+                let increased_size_buf = tx_buffer.restore_headroom::<2>().unwrap();
+                let new_buf = increased_size_buf.prepend::<HEAD, 4>(&header);
+                let _ = self.uart.transmit_buffer(new_buf, transaction_len);
             });
         } else {
             app.pending_write = true;
