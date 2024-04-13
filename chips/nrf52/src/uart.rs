@@ -15,7 +15,7 @@ use core::cmp::min;
 use cortex_m_semihosting::hprintln;
 use kernel::hil::uart;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
-use kernel::utilities::packet_buffer::{PacketBufferMut, PacketSliceMut};
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use kernel::utilities::registers::interfaces::{Readable, Writeable};
 use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite, WriteOnly};
 use kernel::utilities::StaticRef;
@@ -311,6 +311,7 @@ impl<'a, const HEAD: usize, const TAIL: usize, const HEAD_CLIENT: usize>
                 // Signal client write done
                 self.tx_client.map(|client| {
                     self.tx_buffer.take().map(|tx_buffer| {
+                        tx_buffer.reset(10);
                         client.transmitted_buffer(
                             PacketBufferMut::new(tx_buffer).unwrap(),
                             self.tx_len.get(),

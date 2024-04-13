@@ -282,7 +282,7 @@ impl PacketSliceMut {
             slice[Self::SLICE_LENGTH_BYTES].copy_from_slice(&usize::to_ne_bytes(length));
 
             // Start with zero headroom, and full tailroom (simulating an empty slice)
-            slice[Self::HEADROOM_BYTES].copy_from_slice(&usize::to_ne_bytes(0));
+            slice[Self::HEADROOM_BYTES].copy_from_slice(&usize::to_ne_bytes(10));
             slice[Self::TAILROOM_BYTES]
                 .copy_from_slice(&usize::to_ne_bytes(length - Self::DATA_SLICE.start));
 
@@ -347,6 +347,7 @@ impl PacketSliceMut {
     }
 
     fn set_headroom(&mut self, headroom: usize) {
+        hprintln!("Setting headroom to: {}", headroom);
         unsafe {
             self.restore_inner_slice_mut()[Self::HEADROOM_BYTES]
                 .copy_from_slice(&usize::to_ne_bytes(headroom));
@@ -438,6 +439,10 @@ unsafe impl PacketBufferDyn for PacketSliceMut {
 
     fn reclaim_headroom(&mut self, new_headroom: usize) -> bool {
         if new_headroom <= self.data_slice().len() - self.tailroom() {
+            hprintln!(
+                "RECLAIM HEADROOM: setting headroom to new value {}",
+                new_headroom
+            );
             self.set_headroom(new_headroom);
             true
         } else {
@@ -453,6 +458,7 @@ unsafe impl PacketBufferDyn for PacketSliceMut {
         if new_headroom > self.data_slice().len() {
             false
         } else {
+            hprintln!("RESET: setting headroom to new value {}", new_headroom);
             self.set_headroom(new_headroom);
             self.set_tailroom(self.data_slice().len() - new_headroom);
             true
@@ -493,6 +499,10 @@ unsafe impl PacketBufferDyn for PacketSliceMut {
         hprintln!(
             "PB: old headroom is {}, new headroom is {}",
             self.get_headroom(),
+            self.get_headroom().saturating_sub(header.len())
+        );
+        hprintln!(
+            "PREPAND: setting headroom to new headroom {}",
             self.get_headroom().saturating_sub(header.len())
         );
         self.set_headroom(self.get_headroom().saturating_sub(header.len()));

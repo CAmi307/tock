@@ -103,7 +103,8 @@ pub struct App {
 }
 
 pub struct Console<'a, const HEAD: usize = 1, const TAIL: usize = 0> {
-    uart: &'a dyn uart::UartData<'a, HEAD, TAIL, HEAD>,
+    // #[buffer(HEAD-1, TAIL-1)]
+    uart: &'a dyn uart::UartData<'a, { HEAD - 1 }, TAIL, HEAD>,
     apps: Grant<
         App,
         UpcallCount<{ upcall::COUNT }>,
