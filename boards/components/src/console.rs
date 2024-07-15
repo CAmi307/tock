@@ -39,12 +39,14 @@ use capsules_core::console_ordered::ConsoleOrdered;
 use capsules_core::virtualizers::virtual_alarm::{MuxAlarm, VirtualMuxAlarm};
 use capsules_core::virtualizers::virtual_uart::{MuxUart, UartDevice};
 use core::mem::MaybeUninit;
+use cortex_m_semihosting::hprintln;
 use kernel::capabilities;
 use kernel::component::Component;
 use kernel::create_capability;
 use kernel::hil;
 use kernel::hil::time::{self, Alarm};
 use kernel::hil::uart;
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 
 use capsules_core::console::DEFAULT_BUF_SIZE;
 
@@ -67,13 +69,13 @@ macro_rules! uart_mux_component_static {
 }
 
 pub struct UartMuxComponent<const RX_BUF_LEN: usize> {
-    uart: &'static dyn uart::Uart<'static>,
+    uart: &'static dyn uart::Uart<'static, 0, 0, 1>,
     baud_rate: u32,
 }
 
 impl<const RX_BUF_LEN: usize> UartMuxComponent<RX_BUF_LEN> {
     pub fn new(
-        uart: &'static dyn uart::Uart<'static>,
+        uart: &'static dyn uart::Uart<'static, 0, 0, 1>,
         baud_rate: u32,
     ) -> UartMuxComponent<RX_BUF_LEN> {
         UartMuxComponent { uart, baud_rate }
@@ -89,7 +91,8 @@ impl<const RX_BUF_LEN: usize> Component for UartMuxComponent<RX_BUF_LEN> {
 
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
         let rx_buf = s.1.write([0; RX_BUF_LEN]);
-        let uart_mux = s.0.write(MuxUart::new(self.uart, rx_buf, self.baud_rate));
+        let uart_mux =
+            s.0.write(MuxUart::<1, 0, 0>::new(self.uart, rx_buf, self.baud_rate));
         kernel::deferred_call::DeferredCallClient::register(uart_mux);
 
         uart_mux.initialize();
@@ -132,7 +135,7 @@ impl<const RX_BUF_LEN: usize, const TX_BUF_LEN: usize> ConsoleComponent<RX_BUF_L
     pub fn new(
         board_kernel: &'static kernel::Kernel,
         driver_num: usize,
-        uart_mux: &'static MuxUart,
+        uart_mux: &'static MuxUart<1, 0, 0>,
     ) -> ConsoleComponent<RX_BUF_LEN, TX_BUF_LEN> {
         ConsoleComponent {
             board_kernel: board_kernel,
@@ -154,8 +157,10 @@ impl<const RX_BUF_LEN: usize, const TX_BUF_LEN: usize> Component
     type Output = &'static console::Console<'static>;
 
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
+        hprintln!("CONSOLE finalizare");
         let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
 
+        hprintln!("TX_BUF_LEN IS {}", TX_BUF_LEN);
         let write_buffer = s.0.write([0; TX_BUF_LEN]);
 
         let read_buffer = s.1.write([0; RX_BUF_LEN]);
@@ -163,12 +168,21 @@ impl<const RX_BUF_LEN: usize, const TX_BUF_LEN: usize> Component
         let console_uart = s.2.write(UartDevice::new(self.uart_mux, true));
         console_uart.setup();
 
+        hprintln!("BEFORE CONSTRUCTING THE CONSOLE");
+        let ps = PacketSliceMut::new(write_buffer).unwrap();
+        hprintln!(
+            "PacketSlice headroom is {}, and tailroom {}",
+            ps.headroom(),
+            ps.tailroom()
+        );
         let console = s.3.write(console::Console::new(
             console_uart,
-            write_buffer,
+            PacketBufferMut::<1, 0>::new(ps).unwrap(),
             read_buffer,
             self.board_kernel.create_grant(self.driver_num, &grant_cap),
         ));
+        hprintln!("AFTER CONSTRUCTING THE CONSOLE");
+
         hil::uart::Transmit::set_transmit_client(console_uart, console);
         hil::uart::Receive::set_receive_client(console_uart, console);
 

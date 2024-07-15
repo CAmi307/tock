@@ -46,30 +46,35 @@
 //! ```
 
 use core::cell::Cell;
-use core::cmp;
+use core::{cmp, usize};
 
+use cortex_m_semihosting::hprintln;
 use kernel::collections::list::{List, ListLink, ListNode};
 use kernel::deferred_call::{DeferredCall, DeferredCallClient};
 use kernel::hil::uart;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
-use kernel::ErrorCode;
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
+use kernel::{debug, ErrorCode};
 
 pub const RX_BUF_LEN: usize = 64;
 
-pub struct MuxUart<'a> {
-    uart: &'a dyn uart::Uart<'a>,
+pub struct MuxUart<'a, const HEAD: usize = 1, const TAIL: usize = 0, const HEAD_UARTE: usize = 0> {
+    // ASTA E UARTE -> 0,0
+    uart: &'a dyn uart::Uart<'a, HEAD_UARTE, TAIL, HEAD>,
     speed: u32,
-    devices: List<'a, UartDevice<'a>>,
-    inflight: OptionalCell<&'a UartDevice<'a>>,
+    devices: List<'a, UartDevice<'a, HEAD, TAIL>>,
+    inflight: OptionalCell<&'a UartDevice<'a, HEAD, TAIL>>,
     buffer: TakeCell<'static, [u8]>,
     completing_read: Cell<bool>,
     deferred_call: DeferredCall,
 }
 
-impl<'a> uart::TransmitClient for MuxUart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> uart::TransmitClient<HEAD, TAIL>
+    for MuxUart<'a, HEAD, TAIL>
+{
     fn transmitted_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
         rcode: Result<(), ErrorCode>,
     ) {
@@ -81,7 +86,7 @@ impl<'a> uart::TransmitClient for MuxUart<'a> {
     }
 }
 
-impl<'a> uart::ReceiveClient for MuxUart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> uart::ReceiveClient for MuxUart<'a, HEAD, TAIL> {
     fn received_buffer(
         &self,
         buffer: &'static mut [u8],
@@ -89,6 +94,11 @@ impl<'a> uart::ReceiveClient for MuxUart<'a> {
         rcode: Result<(), ErrorCode>,
         error: uart::Error,
     ) {
+        // panic!(
+        // "MUX UART: RECEIVED BUFFER {:?}",
+        // buffer.make_ascii_lowercase()
+        // );
+
         // Likely we will issue another receive in response to the previous one
         // finishing. `next_read_len` keeps track of the shortest outstanding
         // receive requested by any client. We start with the longest it can be,
@@ -210,8 +220,14 @@ impl<'a> uart::ReceiveClient for MuxUart<'a> {
     }
 }
 
-impl<'a> MuxUart<'a> {
-    pub fn new(uart: &'a dyn uart::Uart<'a>, buffer: &'static mut [u8], speed: u32) -> MuxUart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize, const HEAD_UARTE: usize>
+    MuxUart<'a, HEAD, TAIL, HEAD_UARTE>
+{
+    pub fn new(
+        uart: &'a dyn uart::Uart<'a, HEAD_UARTE, TAIL, HEAD>,
+        buffer: &'static mut [u8],
+        speed: u32,
+    ) -> MuxUart<'a, HEAD, TAIL, HEAD_UARTE> {
         MuxUart {
             uart,
             speed,
@@ -234,29 +250,60 @@ impl<'a> MuxUart<'a> {
     }
 
     fn do_next_op(&self) {
+        // panic!("In do next op");
+        // hprintln!("In do next op");
         if self.inflight.is_none() {
             let mnode = self.devices.iter().find(|node| node.operation.is_some());
             mnode.map(|node| {
                 node.tx_buffer.take().map(|buf| {
-                    node.operation.take().map(move |op| match op {
-                        Operation::Transmit { len } => match self.uart.transmit_buffer(buf, len) {
-                            Ok(()) => {
-                                self.inflight.set(node);
+                    node.operation.take().map(move |op| {
+                        // let packet_slice = PacketSliceMut::new(buf).unwrap();
+
+                        // put some headers
+                        // let new_buffer = buf.prepand([...])
+                        // let new_buffer = buf.reduce_headroom();
+                        // ----------------
+                        match op {
+                            Operation::Transmit { len } => {
+                                // hprintln!("MUX: transmitting buffer with len {}", len);
+                                // hprintln!("MUX: appending 0xFF to the end of the buffer");
+
+                                // let header = [65u8; 2];
+                                let header: &[u8; 1] = b"A";
+
+                                let new_buf = buf.prepand::<HEAD_UARTE, 1>(&header);
+                                // let slice = new_buf.downcast::<PacketSliceMut>().unwrap();
+                                // let end = [255u8; 1];
+                                // slice.append_from_slice_max(&end);
+
+                                match self.uart.transmit_buffer(new_buf, len) {
+                                    Ok(()) => {
+                                        self.inflight.set(node);
+                                    }
+                                    Err((ecode, buf)) => {
+                                        // let buffer = buf
+                                        //     .reclaim_headroom()
+                                        //     .unwrap_or_else(|same_pb| same_pb);
+
+                                        node.tx_client.map(move |client| {
+                                            node.transmitting.set(false);
+
+                                            // TODO: REMOVE!!!!!!!
+                                            // let new_buf = buf.reduce_headroom::<0>();
+                                            let new_buf = buf.reclaim_headroom::<HEAD>().unwrap();
+                                            client.transmitted_buffer(new_buf, 0, Err(ecode));
+                                        });
+                                    }
+                                }
                             }
-                            Err((ecode, buf)) => {
-                                node.tx_client.map(move |client| {
-                                    node.transmitting.set(false);
-                                    client.transmitted_buffer(buf, 0, Err(ecode));
-                                });
-                            }
-                        },
-                        Operation::TransmitWord { word } => {
-                            let rcode = self.uart.transmit_word(word);
-                            if rcode != Ok(()) {
-                                node.tx_client.map(|client| {
-                                    node.transmitting.set(false);
-                                    client.transmitted_word(rcode);
-                                });
+                            Operation::TransmitWord { word } => {
+                                let rcode = self.uart.transmit_word(word);
+                                if rcode != Ok(()) {
+                                    node.tx_client.map(|client| {
+                                        node.transmitting.set(false);
+                                        client.transmitted_word(rcode);
+                                    });
+                                }
                             }
                         }
                     });
@@ -314,7 +361,7 @@ impl<'a> MuxUart<'a> {
     }
 }
 
-impl DeferredCallClient for MuxUart<'_> {
+impl<const HEAD: usize, const TAIL: usize> DeferredCallClient for MuxUart<'_, HEAD, TAIL> {
     fn handle_deferred_call(&self) {
         self.do_next_op();
     }
@@ -337,28 +384,29 @@ enum UartDeviceReceiveState {
     Aborting,
 }
 
-pub struct UartDevice<'a> {
+pub struct UartDevice<'a, const HEAD: usize = 1, const TAIL: usize = 0> {
     state: Cell<UartDeviceReceiveState>,
-    mux: &'a MuxUart<'a>,
+    mux: &'a MuxUart<'a, HEAD, TAIL>,
     receiver: bool, // Whether or not to pass this UartDevice incoming messages.
-    tx_buffer: TakeCell<'static, [u8]>,
+    // tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: OptionalCell<PacketBufferMut<HEAD, TAIL>>,
     transmitting: Cell<bool>,
     rx_buffer: TakeCell<'static, [u8]>,
     rx_position: Cell<usize>,
     rx_len: Cell<usize>,
     operation: OptionalCell<Operation>,
-    next: ListLink<'a, UartDevice<'a>>,
+    next: ListLink<'a, UartDevice<'a, HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn uart::ReceiveClient>,
-    tx_client: OptionalCell<&'a dyn uart::TransmitClient>,
+    tx_client: OptionalCell<&'a dyn uart::TransmitClient<HEAD, TAIL>>,
 }
 
-impl<'a> UartDevice<'a> {
-    pub fn new(mux: &'a MuxUart<'a>, receiver: bool) -> UartDevice<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> UartDevice<'a, HEAD, TAIL> {
+    pub fn new(mux: &'a MuxUart<'a, HEAD, TAIL>, receiver: bool) -> UartDevice<'a, HEAD, TAIL> {
         UartDevice {
             state: Cell::new(UartDeviceReceiveState::Idle),
             mux: mux,
             receiver: receiver,
-            tx_buffer: TakeCell::empty(),
+            tx_buffer: OptionalCell::empty(),
             transmitting: Cell::new(false),
             rx_buffer: TakeCell::empty(),
             rx_position: Cell::new(0),
@@ -376,10 +424,12 @@ impl<'a> UartDevice<'a> {
     }
 }
 
-impl<'a> uart::TransmitClient for UartDevice<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> uart::TransmitClient<HEAD, TAIL>
+    for UartDevice<'a, HEAD, TAIL>
+{
     fn transmitted_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
         rcode: Result<(), ErrorCode>,
     ) {
@@ -396,7 +446,7 @@ impl<'a> uart::TransmitClient for UartDevice<'a> {
         });
     }
 }
-impl<'a> uart::ReceiveClient for UartDevice<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> uart::ReceiveClient for UartDevice<'a, HEAD, TAIL> {
     fn received_buffer(
         &self,
         rx_buffer: &'static mut [u8],
@@ -411,14 +461,18 @@ impl<'a> uart::ReceiveClient for UartDevice<'a> {
     }
 }
 
-impl<'a> ListNode<'a, UartDevice<'a>> for UartDevice<'a> {
-    fn next(&'a self) -> &'a ListLink<'a, UartDevice<'a>> {
+impl<'a, const HEAD: usize, const TAIL: usize> ListNode<'a, UartDevice<'a, HEAD, TAIL>>
+    for UartDevice<'a, HEAD, TAIL>
+{
+    fn next(&'a self) -> &'a ListLink<'a, UartDevice<'a, HEAD, TAIL>> {
         &self.next
     }
 }
 
-impl<'a> uart::Transmit<'a> for UartDevice<'a> {
-    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> uart::Transmit<'a, HEAD, TAIL, HEAD>
+    for UartDevice<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
@@ -429,9 +483,9 @@ impl<'a> uart::Transmit<'a> for UartDevice<'a> {
     /// Transmit data.
     fn transmit_buffer(
         &self,
-        tx_data: &'static mut [u8],
+        tx_data: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.transmitting.get() {
             Err((ErrorCode::BUSY, tx_data))
         } else {
@@ -455,7 +509,7 @@ impl<'a> uart::Transmit<'a> for UartDevice<'a> {
     }
 }
 
-impl<'a> uart::Receive<'a> for UartDevice<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> uart::Receive<'a> for UartDevice<'a, HEAD, TAIL> {
     fn set_receive_client(&self, client: &'a dyn uart::ReceiveClient) {
         self.rx_client.set(client);
     }
@@ -466,6 +520,7 @@ impl<'a> uart::Receive<'a> for UartDevice<'a> {
         rx_buffer: &'static mut [u8],
         rx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+        // hprintln!("MUX: In receive buffer with buffer: {:?}", rx_buffer);
         if self.rx_buffer.is_some() {
             Err((ErrorCode::BUSY, rx_buffer))
         } else if rx_len > rx_buffer.len() {

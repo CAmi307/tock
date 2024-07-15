@@ -12,6 +12,7 @@
 #![cfg_attr(not(doc), no_main)]
 #![deny(missing_docs)]
 
+use cortex_m_semihosting::hprintln;
 use kernel::capabilities;
 use kernel::component::Component;
 use kernel::hil::time::Counter;
@@ -94,7 +95,7 @@ pub struct MicroBit {
             nrf52::rtc::Rtc<'static>,
         >,
     >,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 1, 0>,
     gpio: &'static capsules_core::gpio::GPIO<'static, nrf52::gpio::GPIOPin<'static>>,
     led: &'static capsules_core::led::LedDriver<
         'static,
@@ -741,6 +742,7 @@ unsafe fn start() -> (
     );
     CHIP = Some(chip);
 
+    // hprintln!("Init complete");
     debug!("Initialization complete. Entering main loop.");
 
     //--------------------------------------------------------------------------
@@ -787,6 +789,8 @@ unsafe fn start() -> (
 pub unsafe fn main() {
     let main_loop_capability = create_capability!(capabilities::MainLoopCapability);
 
+    // panic!("ZI PROASTA");
+    // hprintln!("BUNA ZIUA");
     let (board_kernel, board, chip) = start();
     board_kernel.kernel_loop(&board, chip, Some(&board.ipc), &main_loop_capability);
 }
