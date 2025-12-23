@@ -82,12 +82,12 @@ macro_rules! debug_writer_no_mux_component_static {
 }
 
 pub struct DebugWriterComponent<const BUF_SIZE_BYTES: usize> {
-    uart_mux: &'static MuxUart<'static, 0, 0, 1, 1>,
+    uart_mux: &'static MuxUart<'static, 1, 1>,
     marker: core::marker::PhantomData<[u8; BUF_SIZE_BYTES]>,
 }
 
 impl<const BUF_SIZE_BYTES: usize> DebugWriterComponent<BUF_SIZE_BYTES> {
-    pub fn new(uart_mux: &'static MuxUart<0, 0, 1, 1>) -> Self {
+    pub fn new(uart_mux: &'static MuxUart<1, 1>) -> Self {
         Self {
             uart_mux,
             marker: core::marker::PhantomData,
@@ -100,10 +100,10 @@ unsafe impl capabilities::ProcessManagementCapability for Capability {}
 
 impl<const BUF_SIZE_BYTES: usize> Component for DebugWriterComponent<BUF_SIZE_BYTES> {
     type StaticInput = (
-        &'static mut MaybeUninit<UartDevice<'static, 1, 1, 0, 0>>,
+        &'static mut MaybeUninit<UartDevice<'static, 1, 1>>,
         &'static mut MaybeUninit<RingBuffer<'static, u8>>,
         &'static mut MaybeUninit<[u8; BUF_SIZE_BYTES]>,
-        &'static mut MaybeUninit<kernel::debug::DebugWriter<2, 1, 1, 1>>,
+        &'static mut MaybeUninit<kernel::debug::DebugWriter<2, 1>>,
         &'static mut MaybeUninit<kernel::debug::DebugWriterWrapper>,
     );
     type Output = ();
