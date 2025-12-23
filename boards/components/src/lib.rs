@@ -3,6 +3,7 @@
 // Copyright Tock Contributors 2022.
 
 #![no_std]
+#![feature(generic_const_exprs)]
 
 pub mod adc;
 pub mod adc_microphone;

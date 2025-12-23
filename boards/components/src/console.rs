@@ -55,7 +55,7 @@ macro_rules! uart_mux_component_static {
     ($rx_buffer_len: expr) => {{
         use capsules_core::virtualizers::virtual_uart::MuxUart;
         use kernel::static_buf;
-        let UART_MUX = static_buf!(MuxUart<'static, 0, 0, 1, 1>);
+        let UART_MUX = static_buf!(MuxUart<'static, 1, 1>);
         let RX_BUF = static_buf!([u8; $rx_buffer_len]);
         (UART_MUX, RX_BUF)
     }};
@@ -83,10 +83,10 @@ impl<const RX_BUF_LEN: usize> UartMuxComponent<RX_BUF_LEN> {
 
 impl<const RX_BUF_LEN: usize> Component for UartMuxComponent<RX_BUF_LEN> {
     type StaticInput = (
-        &'static mut MaybeUninit<MuxUart<'static, 0, 0, 1, 1>>,
+        &'static mut MaybeUninit<MuxUart<'static, 1, 1>>,
         &'static mut MaybeUninit<[u8; RX_BUF_LEN]>,
     );
-    type Output = &'static MuxUart<'static, 0, 0, 1, 1>;
+    type Output = &'static MuxUart<'static, 1, 1>;
 
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
         let rx_buf = s.1.write([0; RX_BUF_LEN]);
@@ -111,8 +111,8 @@ macro_rules! console_component_static {
         let read_buf = static_buf!([u8; $rx_buffer_len]);
         let write_buf = static_buf!([u8; $tx_buffer_len]);
         // Create virtual device for console.
-        let console_uart = static_buf!(UartDevice<1, 1, 0,0>);
-        let console = static_buf!(Console<'static, 2, 1, 1, 1>);
+        let console_uart = static_buf!(UartDevice<1, 1>);
+        let console = static_buf!(Console<'static, 2, 1,>);
         (write_buf, read_buf, console_uart, console)
     }};
     () => {
@@ -126,14 +126,14 @@ macro_rules! console_component_static {
 pub struct ConsoleComponent<const RX_BUF_LEN: usize, const TX_BUF_LEN: usize> {
     board_kernel: &'static kernel::Kernel,
     driver_num: usize,
-    uart_mux: &'static MuxUart<'static, 0, 0, 1, 1>,
+    uart_mux: &'static MuxUart<'static, 1, 1>,
 }
 
 impl<const RX_BUF_LEN: usize, const TX_BUF_LEN: usize> ConsoleComponent<RX_BUF_LEN, TX_BUF_LEN> {
     pub fn new(
         board_kernel: &'static kernel::Kernel,
         driver_num: usize,
-        uart_mux: &'static MuxUart<0, 0, 1, 1>,
+        uart_mux: &'static MuxUart<1, 1>,
     ) -> ConsoleComponent<RX_BUF_LEN, TX_BUF_LEN> {
         ConsoleComponent {
             board_kernel: board_kernel,
@@ -149,10 +149,10 @@ impl<const RX_BUF_LEN: usize, const TX_BUF_LEN: usize> Component
     type StaticInput = (
         &'static mut MaybeUninit<[u8; TX_BUF_LEN]>,
         &'static mut MaybeUninit<[u8; RX_BUF_LEN]>,
-        &'static mut MaybeUninit<UartDevice<'static, 1, 1, 0, 0>>,
-        &'static mut MaybeUninit<console::Console<'static, 2, 1, 1, 1>>,
+        &'static mut MaybeUninit<UartDevice<'static, 1, 1>>,
+        &'static mut MaybeUninit<console::Console<'static, 2, 1>>,
     );
-    type Output = &'static console::Console<'static, 2, 1, 1, 1>;
+    type Output = &'static console::Console<'static, 2, 1>;
 
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
         let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);

@@ -41,14 +41,12 @@
 //! the driver. Successive writes must call `allow` each time a buffer is to be
 //! written.
 
-use cortex_m_semihosting::{hprint, hprintln};
 use kernel::grant::{AllowRoCount, AllowRwCount, Grant, GrantKernelData, UpcallCount};
 use kernel::hil::uart;
 use kernel::processbuffer::{ReadableProcessBuffer, WriteableProcessBuffer};
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::{OptionalCell, TakeCell};
-use kernel::utilities::copy_slice::CopyOrErr;
-use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
+use kernel::utilities::packet_buffer::PacketBufferMut;
 use kernel::{ErrorCode, ProcessId};
 
 /// Syscall driver number.
@@ -102,14 +100,11 @@ pub struct App {
     read_len: usize,
 }
 
-pub struct Console<
-    'a,
-    const HEAD: usize,
-    const TAIL: usize,
-    const LOWER_HEAD: usize,
-    const LOWER_TAIL: usize,
-> {
-    uart: &'a dyn uart::UartData<'a, LOWER_HEAD, LOWER_TAIL>,
+pub struct Console<'a, const HEAD: usize, const TAIL: usize>
+where
+    [(); HEAD - 1]:,
+{
+    uart: &'a dyn uart::UartData<'a, { HEAD - 1 }, TAIL>,
     apps: Grant<
         App,
         UpcallCount<{ upcall::COUNT }>,
@@ -122,16 +117,12 @@ pub struct Console<
     rx_buffer: TakeCell<'static, [u8]>,
 }
 
-impl<
-        'a,
-        const HEAD: usize,
-        const TAIL: usize,
-        const LOWER_HEAD: usize,
-        const LOWER_TAIL: usize,
-    > Console<'a, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+impl<'a, const HEAD: usize, const TAIL: usize> Console<'a, HEAD, TAIL>
+where
+    [(); HEAD - 1]:,
 {
     pub fn new(
-        uart: &'a dyn uart::UartData<'a, LOWER_HEAD, LOWER_TAIL>,
+        uart: &'a dyn uart::UartData<'a, { HEAD - 1 }, TAIL>,
         tx_buffer: PacketBufferMut<HEAD, TAIL>,
         rx_buffer: &'static mut [u8],
         grant: Grant<
@@ -140,7 +131,7 @@ impl<
             AllowRoCount<{ ro_allow::COUNT }>,
             AllowRwCount<{ rw_allow::COUNT }>,
         >,
-    ) -> Console<'a, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL> {
+    ) -> Console<'a, HEAD, TAIL> {
         Console {
             uart: uart,
             apps: grant,
@@ -239,7 +230,7 @@ impl<
                 // TODO: Check and make sure that the process id should not be greater than 256
                 let process_id: [u8; 1] = (processid.id() as u8).to_ne_bytes();
                 let buf = tx_buffer
-                    .prepend::<LOWER_HEAD, 1>(&process_id)
+                    .prepend::<{ HEAD - 1 }, 1>(&process_id)
                     .reduce_tailroom();
                 let _ = self.uart.transmit_buffer(buf, transaction_len);
             });
@@ -287,8 +278,9 @@ impl<
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    SyscallDriver for Console<'_, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+impl<const HEAD: usize, const TAIL: usize> SyscallDriver for Console<'_, HEAD, TAIL>
+where
+    [(); HEAD - 1]:,
 {
     /// Initiate serial transfers
     ///
@@ -344,13 +336,12 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    uart::TransmitClient<LOWER_HEAD, LOWER_TAIL>
-    for Console<'_, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+impl<const HEAD: usize, const TAIL: usize> uart::TransmitClient<{ HEAD - 1 }, TAIL>
+    for Console<'_, HEAD, TAIL>
 {
     fn transmitted_buffer(
         &self,
-        buffer: PacketBufferMut<LOWER_HEAD, LOWER_TAIL>,
+        buffer: PacketBufferMut<{ HEAD - 1 }, TAIL>,
         _tx_len: usize,
         _rcode: Result<(), ErrorCode>,
     ) {
@@ -401,8 +392,9 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    uart::ReceiveClient for Console<'_, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+impl<const HEAD: usize, const TAIL: usize> uart::ReceiveClient for Console<'_, HEAD, TAIL>
+where
+    [(); HEAD - 1]:,
 {
     fn received_buffer(
         &self,

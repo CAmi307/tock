@@ -49,10 +49,10 @@ const DEBUG_BUFFER_SPLIT: usize = 64;
 #[macro_export]
 macro_rules! debug_writer_component_static {
     ($BUF_SIZE_KB:expr) => {{
-        let uart = kernel::static_buf!(capsules_core::virtualizers::virtual_uart::UartDevice<1,1,0,0>);
+        let uart = kernel::static_buf!(capsules_core::virtualizers::virtual_uart::UartDevice<1,1>);
         let ring = kernel::static_buf!(kernel::collections::ring_buffer::RingBuffer<'static, u8>);
         let buffer = kernel::static_buf!([u8; 1024 * $BUF_SIZE_KB]);
-        let debug = kernel::static_buf!(kernel::debug::DebugWriter<2,1,1,1>);
+        let debug = kernel::static_buf!(kernel::debug::DebugWriter<2,1>);
         let debug_wrapper = kernel::static_buf!(kernel::debug::DebugWriterWrapper);
 
         (uart, ring, buffer, debug, debug_wrapper)
@@ -82,12 +82,12 @@ macro_rules! debug_writer_no_mux_component_static {
 }
 
 pub struct DebugWriterComponent<const BUF_SIZE_BYTES: usize> {
-    uart_mux: &'static MuxUart<'static, 0, 0, 1, 1>,
+    uart_mux: &'static MuxUart<'static, 1, 1>,
     marker: core::marker::PhantomData<[u8; BUF_SIZE_BYTES]>,
 }
 
 impl<const BUF_SIZE_BYTES: usize> DebugWriterComponent<BUF_SIZE_BYTES> {
-    pub fn new(uart_mux: &'static MuxUart<0, 0, 1, 1>) -> Self {
+    pub fn new(uart_mux: &'static MuxUart<1, 1>) -> Self {
         Self {
             uart_mux,
             marker: core::marker::PhantomData,
@@ -100,10 +100,10 @@ unsafe impl capabilities::ProcessManagementCapability for Capability {}
 
 impl<const BUF_SIZE_BYTES: usize> Component for DebugWriterComponent<BUF_SIZE_BYTES> {
     type StaticInput = (
-        &'static mut MaybeUninit<UartDevice<'static, 1, 1, 0, 0>>,
+        &'static mut MaybeUninit<UartDevice<'static, 1, 1>>,
         &'static mut MaybeUninit<RingBuffer<'static, u8>>,
         &'static mut MaybeUninit<[u8; BUF_SIZE_BYTES]>,
-        &'static mut MaybeUninit<kernel::debug::DebugWriter<2, 1, 1, 1>>,
+        &'static mut MaybeUninit<kernel::debug::DebugWriter<2, 1>>,
         &'static mut MaybeUninit<kernel::debug::DebugWriterWrapper>,
     );
     type Output = ();
