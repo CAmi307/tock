@@ -75,13 +75,12 @@ pub struct MuxUart<
 }
 
 impl<
-        '_,
         const UART_HEAD: usize,
         const UART_TAIL: usize,
         const DEVICE_HEAD: usize,
         const DEVICE_TAIL: usize,
     > uart::TransmitClient<UART_HEAD, UART_TAIL>
-    for MuxUart<'a, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
+    for MuxUart<'_, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
 {
     fn transmitted_buffer(
         &self,
@@ -103,12 +102,11 @@ impl<
 }
 
 impl<
-        '_,
         const UART_HEAD: usize,
         const UART_TAIL: usize,
         const DEVICE_HEAD: usize,
         const DEVICE_TAIL: usize,
-    > uart::ReceiveClient for MuxUart<'a, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
+    > uart::ReceiveClient for MuxUart<'_, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
 {
     fn received_buffer(
         &self,
@@ -472,14 +470,9 @@ impl<
     }
 }
 
-impl<
-        '_,
-        const HEAD: usize,
-        const TAIL: usize,
-        const UARTE_HEAD: usize,
-        const UARTE_TAIL: usize,
-    > uart::TransmitClient<UARTE_HEAD, UARTE_TAIL>
-    for UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
+impl<const HEAD: usize, const TAIL: usize, const UARTE_HEAD: usize, const UARTE_TAIL: usize>
+    uart::TransmitClient<UARTE_HEAD, UARTE_TAIL>
+    for UartDevice<'_, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
 {
     fn transmitted_buffer(
         &self,
@@ -506,13 +499,8 @@ impl<
         });
     }
 }
-impl<
-        '_,
-        const HEAD: usize,
-        const TAIL: usize,
-        const UARTE_HEAD: usize,
-        const UARTE_TAIL: usize,
-    > uart::ReceiveClient for UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
+impl<const HEAD: usize, const TAIL: usize, const UARTE_HEAD: usize, const UARTE_TAIL: usize>
+    uart::ReceiveClient for UartDevice<'_, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
 {
     fn received_buffer(
         &self,

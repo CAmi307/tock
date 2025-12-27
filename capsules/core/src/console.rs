@@ -247,7 +247,12 @@ impl<
                 if let Err((_e, tx_buffer)) = self.uart.transmit_buffer(buf, transaction_len) {
                     // The UART didn't start, so we will not get a transmit
                     // done callback. Need to signal the app now.
-                    self.tx_buffer.replace(tx_buffer);
+                    let buf = tx_buffer
+                        .restore_headroom::<HEAD>()
+                        .unwrap()
+                        .restore_tailroom::<TAIL>()
+                        .unwrap();
+                    self.tx_buffer.replace(buf);
                     self.tx_in_progress.clear();
 
                     // Go ahead and signal the application

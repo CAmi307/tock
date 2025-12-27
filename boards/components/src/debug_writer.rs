@@ -66,7 +66,7 @@ macro_rules! debug_writer_component_static {
         // let debug_wrapper = kernel::static_buf!(kernel::debug::DebugWriterWrapper);
 
         let debug =
-            kernel::static_buf!(capsules_system::debug_writer::uart_debug_writer::UartDebugWriter);
+            kernel::static_buf!(capsules_system::debug_writer::uart_debug_writer::UartDebugWriter<2,1,1,1>);
 
         (uart, ring, buffer, debug)
     };};
@@ -174,7 +174,7 @@ impl<const BUF_SIZE_BYTES: usize, C: SetDebugWriterCapability> Component
         // TODO: update to use constants like in old version
         //   &'static mut MaybeUninit<kernel::debug::DebugWriter<2, 1, 1, 1>>,
         // &'static mut MaybeUninit<kernel::debug::DebugWriterWrapper>,
-        &'static mut MaybeUninit<UartDebugWriter>,
+        &'static mut MaybeUninit<UartDebugWriter<2, 1, 1, 1>>,
     );
     type Output = ();
 
@@ -193,8 +193,11 @@ impl<const BUF_SIZE_BYTES: usize, C: SetDebugWriterCapability> Component
         //     PacketBufferMut::new(ps).unwrap(),
         //     ring_buffer,
         // ));
-        let debugger =
-            s.3.write(UartDebugWriter::new(debugger_uart, output_buf, ring_buffer));
+        let debugger = s.3.write(UartDebugWriter::new(
+            debugger_uart,
+            PacketBufferMut::new(ps).unwrap(),
+            ring_buffer,
+        ));
         hil::uart::Transmit::set_transmit_client(debugger_uart, debugger);
 
         kernel::debug::set_debug_writer_wrapper(debugger, self.capability);

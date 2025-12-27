@@ -5,7 +5,7 @@
 #![forbid(unsafe_code)]
 #![no_std]
 
-pub mod test;
+// pub mod test;
 pub mod tutorials;
 
 #[macro_use]
