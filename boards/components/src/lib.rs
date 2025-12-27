@@ -24,7 +24,7 @@ pub mod button;
 pub mod button_keyboard;
 pub mod can;
 pub mod ccs811;
-// pub mod cdc;
+pub mod cdc;
 pub mod chirp_i2c_moisture;
 pub mod console;
 pub mod crc;

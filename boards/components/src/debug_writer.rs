@@ -61,10 +61,6 @@ macro_rules! debug_writer_component_static {
         let uart = kernel::static_buf!(capsules_core::virtualizers::virtual_uart::UartDevice<1,1,0,0>);
         let ring = kernel::static_buf!(kernel::collections::ring_buffer::RingBuffer<'static, u8>);
         let buffer = kernel::static_buf!([u8; 1024 * $BUF_SIZE_KB]);
-        // TODO: update to use constants like in old version
-        //    let debug = kernel::static_buf!(kernel::debug::DebugWriter<2,1,1,1>);
-        // let debug_wrapper = kernel::static_buf!(kernel::debug::DebugWriterWrapper);
-
         let debug =
             kernel::static_buf!(capsules_system::debug_writer::uart_debug_writer::UartDebugWriter<2,1,1,1>);
 
@@ -171,9 +167,6 @@ impl<const BUF_SIZE_BYTES: usize, C: SetDebugWriterCapability> Component
         &'static mut MaybeUninit<UartDevice<'static, 1, 1, 0, 0>>,
         &'static mut MaybeUninit<RingBuffer<'static, u8>>,
         &'static mut MaybeUninit<[u8; BUF_SIZE_BYTES]>,
-        // TODO: update to use constants like in old version
-        //   &'static mut MaybeUninit<kernel::debug::DebugWriter<2, 1, 1, 1>>,
-        // &'static mut MaybeUninit<kernel::debug::DebugWriterWrapper>,
         &'static mut MaybeUninit<UartDebugWriter<2, 1, 1, 1>>,
     );
     type Output = ();
@@ -186,13 +179,8 @@ impl<const BUF_SIZE_BYTES: usize, C: SetDebugWriterCapability> Component
         let debugger_uart = s.0.write(UartDevice::new(self.uart_mux, false, false));
         debugger_uart.setup();
         let ring_buffer = s.1.write(RingBuffer::new(internal_buf));
-        // TODO: update to use constants like in old version
+
         let ps = PacketSliceMut::new(output_buf, 5).unwrap();
-        // let debugger = s.3.write(kernel::debug::DebugWriter::new(
-        //     debugger_uart,
-        //     PacketBufferMut::new(ps).unwrap(),
-        //     ring_buffer,
-        // ));
         let debugger = s.3.write(UartDebugWriter::new(
             debugger_uart,
             PacketBufferMut::new(ps).unwrap(),
