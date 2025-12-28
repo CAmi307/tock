@@ -21,7 +21,7 @@ impl Write for Writer {
 
 impl IoWrite for Writer {
     fn write(&mut self, buf: &[u8]) -> usize {
-        let uart = esp32::uart::Uart::new(esp32::uart::UART0_BASE);
+        let uart = esp32::uart::Uart::<0, 0>::new(esp32::uart::UART0_BASE);
         uart.disable_tx_interrupt();
         uart.disable_rx_interrupt();
         uart.transmit_sync(buf);

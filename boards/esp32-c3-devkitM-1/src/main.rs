@@ -81,7 +81,7 @@ type SchedulerInUse =
 /// capsules for this platform. We've included an alarm and console.
 struct Esp32C3Board {
     gpio: &'static capsules_core::gpio::GPIO<'static, esp32::gpio::GpioPin<'static>>,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,
         VirtualMuxAlarm<'static, esp32_c3::timg::TimG<'static>>,
