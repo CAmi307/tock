@@ -93,7 +93,7 @@ struct RedboardArtemisNano {
         1,
     >,
     gpio: &'static capsules_core::gpio::GPIO<'static, apollo3::gpio::GpioPin<'static>>,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     i2c_master:
         &'static capsules_core::i2c_master::I2CMasterDriver<'static, apollo3::iom::Iom<'static>>,
     spi_controller: &'static capsules_core::spi_controller::Spi<

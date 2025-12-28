@@ -110,14 +110,11 @@ use crate::process::ProcessSlot;
 use crate::processbuffer::ReadableProcessSlice;
 use crate::utilities::binary_write::BinaryToWriteWrapper;
 use crate::utilities::cells::{MapCell, NumericCellExt};
-use crate::utilities::packet_buffer::PacketBufferDyn;
 use crate::utilities::single_thread_value::SingleThreadValue;
 use core::cell::Cell;
 use core::fmt::{write, Arguments, Write};
 use core::panic::PanicInfo;
 use core::str;
-use cortex_m_semihosting::hprintln;
-use tock_cells::optional_cell::OptionalCell;
 
 /// Implementation of `std::io::Write` for `no_std`.
 ///

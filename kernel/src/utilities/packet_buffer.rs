@@ -1,10 +1,7 @@
+use crate::ErrorCode;
 use core::any::Any;
 use core::fmt::Debug;
 use core::ops::{Range, RangeFrom};
-
-use cortex_m_semihosting::{hprint, hprintln};
-
-use crate::ErrorCode;
 
 /// Internal `PacketBufferDyn` trait, shared across various packet buffer
 /// backends (such as [`PacketSlice`]).
