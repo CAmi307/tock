@@ -87,7 +87,7 @@ type SchedulerInUse = components::sched::round_robin::RoundRobinComponentType;
 /// Supported drivers by the platform
 pub struct RaspberryPiPico2 {
     ipc: kernel::ipc::IPC<{ NUM_PROCS as u8 }>,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     scheduler: &'static SchedulerInUse,
     systick: cortexm33::systick::SysTick,
     alarm: &'static capsules_core::alarm::AlarmDriver<
