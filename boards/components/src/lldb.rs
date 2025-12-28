@@ -27,17 +27,23 @@ use kernel::capabilities;
 use kernel::component::Component;
 use kernel::create_capability;
 use kernel::hil;
+use kernel::utilities::packet_buffer::{PacketBufferMut, PacketSliceMut};
 
 #[macro_export]
 macro_rules! low_level_debug_component_static {
     () => {{
-        let uart =
-            kernel::static_buf!(capsules_core::virtualizers::virtual_uart::UartDevice<'static>);
+        let uart = kernel::static_buf!(
+            capsules_core::virtualizers::virtual_uart::UartDevice<'static, 1, 1, 0, 0>
+        );
         let buffer = kernel::static_buf!([u8; capsules_core::low_level_debug::BUF_LEN]);
         let lldb = kernel::static_buf!(
             capsules_core::low_level_debug::LowLevelDebug<
                 'static,
-                capsules_core::virtualizers::virtual_uart::UartDevice<'static>,
+                capsules_core::virtualizers::virtual_uart::UartDevice<'static, 1, 1, 0, 0>,
+                2,
+                1,
+                1,
+                1,
             >
         );
 
@@ -48,14 +54,14 @@ macro_rules! low_level_debug_component_static {
 pub struct LowLevelDebugComponent {
     board_kernel: &'static kernel::Kernel,
     driver_num: usize,
-    uart_mux: &'static MuxUart<'static>,
+    uart_mux: &'static MuxUart<'static, 0, 0, 1, 1>,
 }
 
 impl LowLevelDebugComponent {
     pub fn new(
         board_kernel: &'static kernel::Kernel,
         driver_num: usize,
-        uart_mux: &'static MuxUart,
+        uart_mux: &'static MuxUart<0, 0, 1, 1>,
     ) -> LowLevelDebugComponent {
         LowLevelDebugComponent {
             board_kernel,
@@ -67,22 +73,24 @@ impl LowLevelDebugComponent {
 
 impl Component for LowLevelDebugComponent {
     type StaticInput = (
-        &'static mut MaybeUninit<UartDevice<'static>>,
+        &'static mut MaybeUninit<UartDevice<'static, 1, 1, 0, 0>>,
         &'static mut MaybeUninit<[u8; capsules_core::low_level_debug::BUF_LEN]>,
-        &'static mut MaybeUninit<LowLevelDebug<'static, UartDevice<'static>>>,
+        &'static mut MaybeUninit<
+            LowLevelDebug<'static, UartDevice<'static, 1, 1, 0, 0>, 2, 1, 1, 1>,
+        >,
     );
-    type Output = &'static LowLevelDebug<'static, UartDevice<'static>>;
-
+    type Output = &'static LowLevelDebug<'static, UartDevice<'static, 1, 1, 0, 0>, 2, 1, 1, 1>;
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
         let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
 
-        let lldb_uart = s.0.write(UartDevice::new(self.uart_mux, true));
+        let lldb_uart = s.0.write(UartDevice::new(self.uart_mux, true, false));
         lldb_uart.setup();
 
         let buffer = s.1.write([0; capsules_core::low_level_debug::BUF_LEN]);
+        let ps = PacketSliceMut::new(buffer, 5).unwrap();
 
         let lldb = s.2.write(LowLevelDebug::new(
-            buffer,
+            PacketBufferMut::new(ps).unwrap(),
             lldb_uart,
             self.board_kernel.create_grant(self.driver_num, &grant_cap),
         ));

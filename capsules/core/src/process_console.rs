@@ -11,16 +11,13 @@ use core::cmp;
 use core::fmt;
 use core::fmt::write;
 use core::str;
-use cortex_m_semihosting::hprintln;
 use kernel::capabilities::ProcessManagementCapability;
 use kernel::capabilities::ProcessStartCapability;
 use kernel::hil::time::ConvertTicks;
 use kernel::utilities::cells::MapCell;
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::cells::TakeCell;
-use kernel::utilities::packet_buffer::PacketBufferDyn;
 use kernel::utilities::packet_buffer::PacketBufferMut;
-use kernel::utilities::packet_buffer::PacketSliceMut;
 use kernel::ProcessId;
 
 use kernel::debug;

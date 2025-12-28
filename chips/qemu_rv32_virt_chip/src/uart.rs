@@ -8,6 +8,7 @@ use core::cell::Cell;
 
 use kernel::hil;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
 use kernel::utilities::registers::{
     register_bitfields, Aliased, Field, InMemoryRegister, ReadOnly, ReadWrite,
@@ -207,11 +208,11 @@ register_bitfields![u16,
     ],
 ];
 
-pub struct Uart16550<'a> {
+pub struct Uart16550<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
     regs: StaticRef<Uart16550Registers>,
-    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient>,
+    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient<HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn hil::uart::ReceiveClient>,
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_len: Cell<usize>,
     tx_index: Cell<usize>,
     rx_buffer: TakeCell<'static, [u8]>,
@@ -219,8 +220,8 @@ pub struct Uart16550<'a> {
     rx_index: Cell<usize>,
 }
 
-impl<'a> Uart16550<'a> {
-    pub fn new(regs: StaticRef<Uart16550Registers>) -> Uart16550<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> Uart16550<'a, HEAD, TAIL> {
+    pub fn new(regs: StaticRef<Uart16550Registers>) -> Uart16550<'a, HEAD, TAIL> {
         // Disable all interrupts when constructing the UART
         regs.ier.set(0xF);
 
@@ -329,11 +330,14 @@ impl Uart16550<'_> {
         // Get the current transmission information
         let mut index = self.tx_index.get();
         let tx_data = self.tx_buffer.take().expect("UART 16550: no tx buffer");
+        let headroom = tx_data.headroom();
 
         if index < self.tx_len.get() {
             // Still data to send
             while index < self.tx_len.get() && self.regs.lsr.is_set(LSR::THREmpty) {
-                self.regs.rbr_thr.write(THR::Data.val(tx_data[index]));
+                self.regs
+                    .rbr_thr
+                    .write(THR::Data.val(tx_data.data_slice_mut()[headroom + index]));
                 index += 1;
             }
 
@@ -348,8 +352,13 @@ impl Uart16550<'_> {
                 .modify(IER::TransmitterHoldingRegisterEmpty::CLEAR);
 
             // Callback to the client
-            self.tx_client
-                .map(move |client| client.transmitted_buffer(tx_data, self.tx_len.get(), Ok(())));
+            self.tx_client.map(move |client| {
+                client.transmitted_buffer(
+                    PacketBufferMut::new(tx_data).unwrap(),
+                    self.tx_len.get(),
+                    Ok(()),
+                )
+            });
         }
     }
 
@@ -427,16 +436,18 @@ impl hil::uart::Configure for Uart16550<'_> {
     }
 }
 
-impl<'a> hil::uart::Transmit<'a> for Uart16550<'a> {
-    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> hil::uart::Transmit<'a, HEAD, TAIL>
+    for Uart16550<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_data: &'static mut [u8],
+        tx_data: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if tx_len > tx_data.len() {
             return Err((ErrorCode::INVAL, tx_data));
         }
@@ -454,13 +465,15 @@ impl<'a> hil::uart::Transmit<'a> for Uart16550<'a> {
         // Start transmitting the first data word(s) already
         let mut index = 0;
         while index < tx_len && self.regs.lsr.is_set(LSR::THREmpty) {
-            self.regs.rbr_thr.write(THR::Data.val(tx_data[index]));
+            self.regs
+                .rbr_thr
+                .write(THR::Data.val(tx_data.payload()[index]));
             index += 1;
         }
 
         // Store the required buffer and information for the interrupt
         // handler
-        self.tx_buffer.replace(tx_data);
+        self.tx_buffer.replace(tx_data.downcast().unwrap());
         self.tx_len.set(tx_len);
         self.tx_index.set(index);
 

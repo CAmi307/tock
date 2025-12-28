@@ -52,7 +52,7 @@ type SchedulerInUse =
 /// A structure representing this platform that holds references to all
 /// capsules for this platform.
 struct ArtyE21 {
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     gpio: &'static capsules_core::gpio::GPIO<'static, arty_e21_chip::gpio::GpioPin<'static>>,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,

@@ -12,6 +12,7 @@ use crate::gpio;
 use kernel::hil;
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::cells::TakeCell;
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
 use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite};
 use kernel::utilities::StaticRef;
@@ -80,15 +81,15 @@ enum UARTStateRX {
     AbortRequested,
 }
 
-pub struct Uart<'a> {
+pub struct Uart<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
     registers: StaticRef<UartRegisters>,
     clock_frequency: u32,
     stop_bits: Cell<hil::uart::StopBits>,
 
-    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient>,
+    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient<HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn hil::uart::ReceiveClient>,
 
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_len: Cell<usize>,
     tx_position: Cell<usize>,
     tx_status: Cell<UARTStateTX>,
@@ -106,8 +107,8 @@ pub struct UartParams {
     pub baud_rate: u32,
 }
 
-impl<'a> Uart<'a> {
-    pub fn new(base: StaticRef<UartRegisters>, clock_frequency: u32) -> Uart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> Uart<'a, HEAD, TAIL> {
+    pub fn new(base: StaticRef<UartRegisters>, clock_frequency: u32) -> Uart<'a, HEAD, TAIL> {
         Uart {
             registers: base,
             clock_frequency,
@@ -190,9 +191,10 @@ impl<'a> Uart<'a> {
     fn tx_progress(&self) {
         while self.uart_is_writable() && self.tx_position.get() < self.tx_len.get() {
             self.tx_buffer.map(|buf| {
+                let headroom = buf.headroom();
                 self.registers
                     .txdata
-                    .set(buf[self.tx_position.get()].into());
+                    .set(buf.data_slice_mut()[headroom + self.tx_position.get()].into());
                 self.tx_position.replace(self.tx_position.get() + 1);
             });
         }
@@ -236,7 +238,11 @@ impl<'a> Uart<'a> {
                 // Signal client write is done
                 self.tx_client.map(|client| {
                     self.tx_buffer.take().map(|buffer| {
-                        client.transmitted_buffer(buffer, self.tx_len.get(), Ok(()));
+                        client.transmitted_buffer(
+                            PacketBufferMut::new(buffer).unwrap(),
+                            self.tx_len.get(),
+                            Ok(()),
+                        );
                     });
                 });
             } else {
@@ -298,7 +304,11 @@ impl DeferredCallClient for Uart<'_> {
             // alert client
             self.tx_client.map(|client| {
                 self.tx_buffer.take().map(|buf| {
-                    client.transmitted_buffer(buf, self.tx_position.get(), Err(ErrorCode::CANCEL));
+                    client.transmitted_buffer(
+                        PacketBufferMut::new(buf).unwrap(),
+                        self.tx_position.get(),
+                        Err(ErrorCode::CANCEL),
+                    );
                 });
             });
             self.tx_status.set(UARTStateTX::Idle);
@@ -341,16 +351,18 @@ impl hil::uart::Configure for Uart<'_> {
     }
 }
 
-impl<'a> hil::uart::Transmit<'a> for Uart<'a> {
-    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> hil::uart::Transmit<'a, HEAD, TAIL>
+    for Uart<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.tx_status.get() != UARTStateTX::Idle {
             Err((ErrorCode::BUSY, tx_buffer))
         } else if tx_len == 0 || tx_len > tx_buffer.len() {
@@ -359,7 +371,7 @@ impl<'a> hil::uart::Transmit<'a> for Uart<'a> {
             self.tx_status.set(UARTStateTX::Transmitting);
 
             // Save the buffer so we can keep sending it.
-            self.tx_buffer.replace(tx_buffer);
+            self.tx_buffer.replace(tx_buffer.downcast().unwrap());
             self.tx_len.set(tx_len);
             self.tx_position.set(0);
 
