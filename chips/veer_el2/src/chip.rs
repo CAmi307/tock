@@ -31,11 +31,11 @@ pub struct VeeR<'a, I: InterruptService + 'a> {
     pmp: PMPUserMPU<4, SimplePMP<8>>,
 }
 
-pub struct VeeRDefaultPeripherals {
-    pub sim_uart: crate::uart::SimUartType,
+pub struct VeeRDefaultPeripherals<const HEAD: usize, const TAIL: usize> {
+    pub sim_uart: crate::uart::SimUartType<HEAD, TAIL>,
 }
 
-impl VeeRDefaultPeripherals {
+impl<const HEAD: usize, const TAIL: usize> VeeRDefaultPeripherals<HEAD, TAIL> {
     pub fn new() -> Self {
         Self {
             sim_uart: crate::uart::SimUartType::new(),
@@ -47,13 +47,13 @@ impl VeeRDefaultPeripherals {
     }
 }
 
-impl Default for VeeRDefaultPeripherals {
+impl<const HEAD: usize, const TAIL: usize> Default for VeeRDefaultPeripherals<HEAD, TAIL> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl InterruptService for VeeRDefaultPeripherals {
+impl<const HEAD: usize, const TAIL: usize> InterruptService for VeeRDefaultPeripherals<HEAD, TAIL> {
     unsafe fn service_interrupt(&self, _interrupt: u32) -> bool {
         true
     }

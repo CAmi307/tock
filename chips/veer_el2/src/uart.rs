@@ -2,4 +2,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // Copyright (c) 2024 Antmicro <www.antmicro.com>
 
-pub type SimUartType = crate::io::SemihostUart<'static>;
+pub type SimUartType<const HEAD: usize, const TAIL: usize> =
+    crate::io::SemihostUart<'static, HEAD, TAIL>;
