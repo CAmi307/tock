@@ -9,7 +9,7 @@ use kernel::debug;
 use kernel::debug::IoWrite;
 
 struct Writer {
-    uart: litex_vexriscv::uart::LiteXUart<'static, crate::socc::SoCRegisterFmt>,
+    uart: litex_vexriscv::uart::LiteXUart<'static, crate::socc::SoCRegisterFmt, 0, 0>,
 }
 
 impl Write for Writer {

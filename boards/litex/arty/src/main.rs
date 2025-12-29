@@ -40,7 +40,7 @@ use litex_generated_constants as socc;
 /// a default interrupt mapping, as the interrupt numbers are
 /// generated sequentially for all softcores.
 struct LiteXArtyInterruptablePeripherals {
-    uart0: &'static litex_vexriscv::uart::LiteXUart<'static, socc::SoCRegisterFmt>,
+    uart0: &'static litex_vexriscv::uart::LiteXUart<'static, socc::SoCRegisterFmt, 0, 0>,
     timer0: &'static litex_vexriscv::timer::LiteXTimer<
         'static,
         socc::SoCRegisterFmt,
@@ -108,16 +108,24 @@ struct LiteXArty {
         litex_vexriscv::led_controller::LiteXLed<'static, socc::SoCRegisterFmt>,
         4,
     >,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     pconsole: &'static capsules_core::process_console::ProcessConsole<
         'static,
         { capsules_core::process_console::DEFAULT_COMMAND_HISTORY_LEN },
         VirtualMuxAlarm<'static, AlarmHw>,
         components::process_console::Capability,
+        2,
+        1,
+        1,
+        1,
     >,
     lldb: &'static capsules_core::low_level_debug::LowLevelDebug<
         'static,
-        capsules_core::virtualizers::virtual_uart::UartDevice<'static>,
+        capsules_core::virtualizers::virtual_uart::UartDevice<'static, 1, 1, 0, 0>,
+        2,
+        1,
+        1,
+        1,
     >,
     alarm: &'static capsules_core::alarm::AlarmDriver<'static, VirtualMuxAlarm<'static, AlarmHw>>,
     ipc: kernel::ipc::IPC<{ NUM_PROCS as u8 }>,
@@ -351,7 +359,7 @@ unsafe fn start() -> (
 
     // Initialize the HW UART
     let uart0 = static_init!(
-        litex_vexriscv::uart::LiteXUart<socc::SoCRegisterFmt>,
+        litex_vexriscv::uart::LiteXUart<socc::SoCRegisterFmt, 0, 0>,
         litex_vexriscv::uart::LiteXUart::new(
             StaticRef::new(
                 socc::CSR_UART_BASE
