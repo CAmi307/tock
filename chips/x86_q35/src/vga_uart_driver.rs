@@ -19,20 +19,21 @@ use core::{cell::Cell, cmp};
 use kernel::deferred_call::{DeferredCall, DeferredCallClient};
 use kernel::hil::uart::{Configure, Parameters, Receive, ReceiveClient, Transmit, TransmitClient};
 use kernel::utilities::cells::TakeCell;
+use kernel::utilities::packet_buffer::{PacketBufferMut, PacketSliceMut};
 use kernel::ErrorCode;
 use tock_cells::optional_cell::OptionalCell;
 
 /// UART-compatible wrapper around the VGA text writer.
-pub struct VgaText<'a> {
+pub struct VgaText<'a, const HEAD: usize, const TAIL: usize> {
     vga_buffer: Vga,
-    tx_client: OptionalCell<&'a dyn TransmitClient>,
+    tx_client: OptionalCell<&'a dyn TransmitClient<HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn ReceiveClient>,
     deferred_call: DeferredCall,
-    pending_buf: TakeCell<'static, [u8]>,
+    pending_buf: TakeCell<'static, PacketSliceMut>,
     pending_len: Cell<usize>,
 }
 
-impl VgaText<'_> {
+impl<const HEAD: usize, const TAIL: usize> VgaText<'_, HEAD, TAIL> {
     pub fn new() -> Self {
         Self {
             vga_buffer: Vga::new(),
@@ -44,7 +45,7 @@ impl VgaText<'_> {
         }
     }
 
-    fn fire_tx_callback(&self, buf: &'static mut [u8], len: usize) {
+    fn fire_tx_callback(&self, buf: PacketBufferMut<HEAD, TAIL>, len: usize) {
         self.tx_client.map(|client| {
             client.transmitted_buffer(buf, len, Ok(()));
         });
@@ -52,11 +53,11 @@ impl VgaText<'_> {
 }
 
 // DeferredCallClient implementation
-impl DeferredCallClient for VgaText<'_> {
+impl<const HEAD: usize, const TAIL: usize> DeferredCallClient for VgaText<'_, HEAD, TAIL> {
     fn handle_deferred_call(&self) {
         if let Some(buf) = self.pending_buf.take() {
             let len = self.pending_len.get();
-            self.fire_tx_callback(buf, len);
+            self.fire_tx_callback(PacketBufferMut::new(buf).unwrap(), len);
         }
     }
 
@@ -66,21 +67,23 @@ impl DeferredCallClient for VgaText<'_> {
 }
 
 // Transmit for Vga
-impl<'a> Transmit<'a> for VgaText<'a> {
-    fn set_transmit_client(&self, client: &'a dyn TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> Transmit<'a, HEAD, TAIL>
+    for VgaText<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        buffer: &'static mut [u8],
+        buffer: PacketBufferMut<HEAD, TAIL>,
         len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        let write_len = cmp::min(len, buffer.len());
-        for &byte in &buffer[..write_len] {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
+        let write_len = cmp::min(len, buffer.payload().len());
+        for &byte in &buffer.payload()[..write_len] {
             self.vga_buffer.write_byte(byte);
         }
-        self.pending_buf.replace(buffer);
+        self.pending_buf.replace(buffer.downcast().unwrap());
         self.pending_len.set(len);
         self.deferred_call.set();
         Ok(())
@@ -96,7 +99,7 @@ impl<'a> Transmit<'a> for VgaText<'a> {
 }
 
 // Receive for Vga
-impl<'a> Receive<'a> for VgaText<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> Receive<'a> for VgaText<'a, HEAD, TAIL> {
     fn set_receive_client(&self, client: &'a dyn ReceiveClient) {
         self.rx_client.set(client);
     }
@@ -119,7 +122,7 @@ impl<'a> Receive<'a> for VgaText<'a> {
 }
 
 // Configure for Vga
-impl Configure for VgaText<'_> {
+impl<const HEAD: usize, const TAIL: usize> Configure for VgaText<'_, HEAD, TAIL> {
     fn configure(&self, _params: Parameters) -> Result<(), ErrorCode> {
         Ok(())
     }

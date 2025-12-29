@@ -17,6 +17,7 @@ use core::cell::Cell;
 use core::fmt::{self, Write};
 use core::mem::MaybeUninit;
 
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use x86::registers::io;
 
 use kernel::component::Component;
@@ -122,15 +123,15 @@ register_bitfields!(u8,
     ],
 );
 
-pub struct SerialPort<'a> {
+pub struct SerialPort<'a, const HEAD: usize, const TAIL: usize> {
     /// Base I/O port address
     base: u16,
 
     /// Client of transmit operations
-    tx_client: OptionalCell<&'a dyn TransmitClient>,
+    tx_client: OptionalCell<&'a dyn TransmitClient<HEAD, TAIL>>,
 
     /// Buffer of data to transmit
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
 
     /// Number of bytes to transmit from tx_buffer
     tx_len: Cell<usize>,
@@ -160,12 +161,12 @@ pub struct SerialPort<'a> {
     dc: DeferredCall,
 }
 
-impl SerialPort<'_> {
+impl<const HEAD: usize, const TAIL: usize> SerialPort<'_, HEAD, TAIL> {
     /// Finishes out a long-running TX operation.
     fn finish_tx(&self, res: Result<(), ErrorCode>) {
         if let Some(b) = self.tx_buffer.take() {
             self.tx_client.map(|c| {
-                c.transmitted_buffer(b, self.tx_len.get(), res);
+                c.transmitted_buffer(PacketBufferMut::new(b).unwrap(), self.tx_len.get(), res);
             });
         }
     }
@@ -192,7 +193,11 @@ impl SerialPort<'_> {
             // Still have bytes to send
             let tx_index = self.tx_index.get();
             self.tx_buffer.map(|b| unsafe {
-                io::outb(self.base + offsets::THR, b[tx_index]);
+                let headroom = b.headroom();
+                io::outb(
+                    self.base + offsets::THR,
+                    b.data_slice_mut()[headroom + tx_index],
+                );
             });
             self.tx_index.set(tx_index + 1);
         } else {
@@ -242,7 +247,7 @@ impl SerialPort<'_> {
     }
 }
 
-impl Configure for SerialPort<'_> {
+impl<const HEAD: usize, const TAIL: usize> Configure for SerialPort<'_, HEAD, TAIL> {
     fn configure(&self, params: Parameters) -> Result<(), ErrorCode> {
         if params.baud_rate == 0 {
             return Err(ErrorCode::INVAL);
@@ -305,16 +310,18 @@ impl Configure for SerialPort<'_> {
     }
 }
 
-impl<'a> Transmit<'a> for SerialPort<'a> {
-    fn set_transmit_client(&self, client: &'a dyn TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> Transmit<'a, HEAD, TAIL>
+    for SerialPort<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.tx_buffer.is_some() {
             return Err((ErrorCode::BUSY, tx_buffer));
         }
@@ -324,9 +331,9 @@ impl<'a> Transmit<'a> for SerialPort<'a> {
         }
 
         // Transmit the first byte
-        unsafe { io::outb(self.base + offsets::THR, tx_buffer[0]) };
+        unsafe { io::outb(self.base + offsets::THR, tx_buffer.payload()[0]) };
 
-        self.tx_buffer.replace(tx_buffer);
+        self.tx_buffer.replace(tx_buffer.downcast().unwrap());
         self.tx_len.set(tx_len);
         self.tx_index.set(1);
 
@@ -357,7 +364,7 @@ impl<'a> Transmit<'a> for SerialPort<'a> {
     }
 }
 
-impl<'a> Receive<'a> for SerialPort<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> Receive<'a> for SerialPort<'a, HEAD, TAIL> {
     fn set_receive_client(&self, client: &'a dyn ReceiveClient) {
         self.rx_client.set(client);
     }
@@ -406,7 +413,7 @@ impl<'a> Receive<'a> for SerialPort<'a> {
     }
 }
 
-impl DeferredCallClient for SerialPort<'_> {
+impl<const HEAD: usize, const TAIL: usize> DeferredCallClient for SerialPort<'_, HEAD, TAIL> {
     fn handle_deferred_call(&self) {
         if self.tx_abort.get() {
             self.finish_tx(Err(ErrorCode::CANCEL));
@@ -445,8 +452,8 @@ impl SerialPortComponent {
 }
 
 impl Component for SerialPortComponent {
-    type StaticInput = (&'static mut MaybeUninit<SerialPort<'static>>,);
-    type Output = &'static SerialPort<'static>;
+    type StaticInput = (&'static mut MaybeUninit<SerialPort<'static, 0, 0>>,);
+    type Output = &'static SerialPort<'static, 0, 0>;
 
     fn finalize(self, s: Self::StaticInput) -> Self::Output {
         let serial = s.0.write(SerialPort {
