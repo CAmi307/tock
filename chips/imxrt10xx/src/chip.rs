@@ -36,8 +36,8 @@ pub struct Imxrt10xxDefaultPeripherals {
     pub ccm_analog: crate::ccm_analog::CcmAnalog,
     pub ports: crate::gpio::Ports<'static>,
     pub lpi2c1: crate::lpi2c::Lpi2c<'static>,
-    pub lpuart1: crate::lpuart::Lpuart<'static>,
-    pub lpuart2: crate::lpuart::Lpuart<'static>,
+    pub lpuart1: crate::lpuart::Lpuart<'static, 0, 0>,
+    pub lpuart2: crate::lpuart::Lpuart<'static, 0, 0>,
     pub gpt1: crate::gpt::Gpt1<'static>,
     pub gpt2: crate::gpt::Gpt2<'static>,
 }

@@ -40,7 +40,7 @@ impl Write for Writer {
 impl IoWrite for Writer {
     fn write(&mut self, buf: &[u8]) -> usize {
         let ccm = crate::imxrt1050::ccm::Ccm::new();
-        let uart = imxrt1050::lpuart::Lpuart::new_lpuart1(&ccm);
+        let uart = imxrt1050::lpuart::Lpuart::<0, 0>::new_lpuart1(&ccm);
 
         if !self.initialized {
             self.initialized = true;

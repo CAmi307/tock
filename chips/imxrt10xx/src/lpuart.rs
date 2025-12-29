@@ -4,6 +4,7 @@
 
 use core::cell::Cell;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
+use kernel::utilities::packet_buffer::{PacketBufferMut, PacketSliceMut};
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
 use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite};
 
@@ -320,14 +321,14 @@ enum USARTStateRX {
     AbortRequested,
 }
 
-pub struct Lpuart<'a> {
+pub struct Lpuart<'a, const HEAD: usize, const TAIL: usize> {
     registers: StaticRef<LpuartRegisters>,
     clock: LpuartClock<'a>,
 
-    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient>,
+    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient<HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn hil::uart::ReceiveClient>,
 
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_position: Cell<usize>,
     tx_len: Cell<usize>,
     tx_status: Cell<LPUARTStateTX>,
@@ -342,7 +343,7 @@ pub struct Lpuart<'a> {
     rx_dma_source: dma::DmaHardwareSource,
 }
 
-impl<'a> Lpuart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> Lpuart<'a, HEAD, TAIL> {
     pub fn new_lpuart1(ccm: &'a ccm::Ccm) -> Self {
         Lpuart::new(
             LPUART1_BASE,
@@ -366,7 +367,7 @@ impl<'a> Lpuart<'a> {
         clock: LpuartClock<'a>,
         tx_dma_source: dma::DmaHardwareSource,
         rx_dma_source: dma::DmaHardwareSource,
-    ) -> Lpuart<'a> {
+    ) -> Lpuart<'a, HEAD, TAIL> {
         Lpuart {
             registers: base_addr,
             clock,
@@ -485,7 +486,7 @@ impl<'a> Lpuart<'a> {
                 let position = self.tx_position.get();
                 if position < self.tx_len.get() {
                     self.tx_buffer.map(|buf| {
-                        self.registers.data.set(buf[position].into());
+                        self.registers.data.set(buf.data_slice()[position].into());
                         self.tx_position.replace(self.tx_position.get() + 1);
                         self.enable_transmit_complete_interrupt();
                     });
@@ -497,7 +498,11 @@ impl<'a> Lpuart<'a> {
                 if self.tx_status.get() == LPUARTStateTX::Idle {
                     self.tx_client.map(|client| {
                         if let Some(buf) = self.tx_buffer.take() {
-                            client.transmitted_buffer(buf, self.tx_len.get(), Ok(()));
+                            client.transmitted_buffer(
+                                PacketBufferMut::new(buf).unwrap(),
+                                self.tx_len.get(),
+                                Ok(()),
+                            );
                         }
                     });
                 }
@@ -506,7 +511,7 @@ impl<'a> Lpuart<'a> {
                 self.tx_client.map(|client| {
                     if let Some(buf) = self.tx_buffer.take() {
                         client.transmitted_buffer(
-                            buf,
+                            PacketBufferMut::new(buf).unwrap(),
                             self.tx_position.get(),
                             Err(ErrorCode::CANCEL),
                         );
@@ -609,12 +614,12 @@ impl<'a> Lpuart<'a> {
     /// Execute an interrupt-driven transfer.
     fn transmit_buffer_interrupt(
         &self,
-        tx_data: &'static mut [u8],
+        tx_data: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.tx_status.get() == LPUARTStateTX::Idle {
             if tx_len <= tx_data.len() {
-                self.tx_buffer.put(Some(tx_data));
+                self.tx_buffer.replace(tx_data.downcast().unwrap());
                 self.tx_position.set(0);
                 self.tx_len.set(tx_len);
                 self.tx_status.set(LPUARTStateTX::Transmitting);
@@ -635,9 +640,9 @@ impl<'a> Lpuart<'a> {
     /// the transfer to the serial output.
     fn transmit_buffer_dma(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.tx_buffer.is_some() {
             return Err((ErrorCode::BUSY, tx_buffer));
         } else if !self.is_transmit_enabled() {
@@ -650,9 +655,9 @@ impl<'a> Lpuart<'a> {
 
         self.tx_dma_channel
             .map(move |dma_channel| unsafe {
-                dma_channel.set_source_buffer(&tx_buffer[..tx_len]);
+                dma_channel.set_source_buffer(&tx_buffer.payload()[..tx_len]);
 
-                self.tx_buffer.put(Some(tx_buffer));
+                self.tx_buffer.replace(tx_buffer.downcast().unwrap());
                 self.tx_len.set(tx_len);
                 dma_channel.enable();
                 self.registers.baud.modify(BAUD::TDMAE::SET);
@@ -770,16 +775,18 @@ impl<'a> Lpuart<'a> {
     }
 }
 
-impl<'a> hil::uart::Transmit<'a> for Lpuart<'a> {
-    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> hil::uart::Transmit<'a, HEAD, TAIL>
+    for Lpuart<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_data: &'static mut [u8],
+        tx_data: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.tx_dma_channel.is_some() {
             self.transmit_buffer_dma(tx_data, tx_len)
         } else {
@@ -801,7 +808,7 @@ impl<'a> hil::uart::Transmit<'a> for Lpuart<'a> {
     }
 }
 
-impl hil::uart::Configure for Lpuart<'_> {
+impl<const HEAD: usize, const TAIL: usize> hil::uart::Configure for Lpuart<'_, HEAD, TAIL> {
     fn configure(&self, params: hil::uart::Parameters) -> Result<(), ErrorCode> {
         if params.baud_rate != 115200
             || params.stop_bits != hil::uart::StopBits::One
@@ -869,7 +876,7 @@ impl hil::uart::Configure for Lpuart<'_> {
     }
 }
 
-impl<'a> hil::uart::Receive<'a> for Lpuart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> hil::uart::Receive<'a> for Lpuart<'a, HEAD, TAIL> {
     fn set_receive_client(&self, client: &'a dyn hil::uart::ReceiveClient) {
         self.rx_client.set(client);
     }
@@ -916,7 +923,7 @@ impl ClockInterface for LpuartClock<'_> {
     }
 }
 
-impl dma::DmaClient for Lpuart<'_> {
+impl<const HEAD: usize, const TAIL: usize> dma::DmaClient for Lpuart<'_, HEAD, TAIL> {
     fn transfer_complete(&self, result: dma::Result) {
         match result {
             // Successful transfer from memory to peripheral
@@ -929,7 +936,7 @@ impl dma::DmaClient for Lpuart<'_> {
                 };
                 self.tx_client.map(|client| {
                     client.transmitted_buffer(
-                        self.tx_buffer.take().unwrap(),
+                        PacketBufferMut::new(self.tx_buffer.take().unwrap()).unwrap(),
                         self.tx_len.take(),
                         result,
                     );
@@ -940,7 +947,7 @@ impl dma::DmaClient for Lpuart<'_> {
                 self.registers.baud.modify(BAUD::TDMAE::CLEAR);
                 self.tx_client.map(|client| {
                     client.transmitted_buffer(
-                        self.tx_buffer.take().unwrap(),
+                        PacketBufferMut::new(self.tx_buffer.take().unwrap()).unwrap(),
                         self.tx_len.take(),
                         Err(ErrorCode::FAIL),
                     );
