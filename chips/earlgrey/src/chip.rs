@@ -41,7 +41,7 @@ pub struct EarlGreyDefaultPeripherals<'a, CFG: EarlGreyConfig, PINMUX: EarlGreyP
     pub aes: crate::aes::Aes<'a>,
     pub hmac: lowrisc::hmac::Hmac<'a>,
     pub usb: lowrisc::usbdev::Usb<'a>,
-    pub uart0: lowrisc::uart::Uart<'a>,
+    pub uart0: lowrisc::uart::Uart<'a, 0, 0>,
     pub otbn: lowrisc::otbn::Otbn<'a>,
     pub gpio_port: crate::gpio::Port<'a>,
     pub i2c0: lowrisc::i2c::I2c<'a>,

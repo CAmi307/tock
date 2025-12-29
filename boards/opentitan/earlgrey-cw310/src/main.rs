@@ -183,7 +183,7 @@ struct EarlGrey {
         'static,
         earlgrey::gpio::GpioPin<'static, earlgrey::pinmux::PadConfig>,
     >,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,
         VirtualMuxAlarm<'static, earlgrey::timer::RvTimer<'static, ChipConfig>>,
@@ -191,7 +191,11 @@ struct EarlGrey {
     hmac: &'static capsules_extra::hmac::HmacDriver<'static, lowrisc::hmac::Hmac<'static>, 32>,
     lldb: &'static capsules_core::low_level_debug::LowLevelDebug<
         'static,
-        capsules_core::virtualizers::virtual_uart::UartDevice<'static>,
+        capsules_core::virtualizers::virtual_uart::UartDevice<'static, 1, 1, 0, 0>,
+        2,
+        1,
+        1,
+        1,
     >,
     i2c_master:
         &'static capsules_core::i2c_master::I2CMasterDriver<'static, lowrisc::i2c::I2c<'static>>,
