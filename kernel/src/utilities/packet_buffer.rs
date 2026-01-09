@@ -1,17 +1,14 @@
+use crate::ErrorCode;
 use core::any::Any;
 use core::fmt::Debug;
 use core::ops::{Range, RangeFrom};
-
-use cortex_m_semihosting::{hprint, hprintln};
-
-use crate::ErrorCode;
+use cortex_m_semihosting::hprintln;
 
 /// Internal `PacketBufferDyn` trait, shared across various packet buffer
 /// backends (such as [`PacketSlice`]).
 ///
 /// This is a safe interface, but should not be used directly. Instead,
 /// manipulate `PacketBufferDyn`s using the [`PacketBufferMut`] container.
-
 pub unsafe trait PacketBufferDyn: Any + Debug {
     /// Length of the allocated data in this buffer (excluding head- and
     /// tailroom).
@@ -62,77 +59,34 @@ pub unsafe trait PacketBufferDyn: Any + Debug {
     // fn iter_mut<'a>(&'a mut self) -> impl Iterator<Item = &mut u8> + 'a;
 }
 
-// TODO: do we need this?
-// impl<T: PacketBufferDyn + Any + ?Sized> PacketBufferDyn for &'static T {
-//     fn len(&self) -> usize {
-//         (**self).len()
-//     }
-// }
-
-// impl<T: PacketBufferDyn + Any + ?Sized> PacketBufferDyn for &'static mut T {
-//     fn len(&self) -> usize {
-//         (**self).len()
-//     }
-
-//     fn headroom(&self) -> usize {
-//         (**self).headroom()
-//     }
-
-//     fn tailroom(&self) -> usize {
-//         (**self).tailroom()
-//     }
-
-//     fn reclaim_headroom(&mut self, new_headroom: usize) -> bool {
-//         (**self).reclaim_headroom(new_headroom)
-//     }
-
-//     fn reset(&mut self, new_headroom: usize) -> bool {
-//         (**self).reset(new_headroom)
-//     }
-
-//     fn copy_from_slice_or_err(&mut self, src: &[u8]) -> Result<(), ErrorCode> {
-// 	(**self).copy_from_slice_or_err(src)
-//     }
-// }
-
-/// Mutable reference to a packet buffer, with explicit headroom (`HEAD`) and
-/// tailroom (`TAIL`) annotations.
-///
-/// This wraper type guarantees that the underlying buffer has
-/// - a headroom of at least `HEAD` bytes, and
-/// - a tailroom of at least `TAIL` bytes.
-///
-/// Methods on this struct generally consume the original packet buffer
-/// reference, and return a new one with different const generic
-/// annotations. These methods ensure that the const generic parameters are
-/// consistent with the inner reference's advertised head- and tailroom.
-///
-/// This wrapper can be constructed from an arbitrary mutable [`PacketBufferDyn`]
-/// reference using [`PacketBufferMut::new`], which will ensure that the `HEAD`
-/// and `TAIL` constraints hold initially.
-///
-/// The original type can be restored through the [`PacketBufferDyn::downcast`]
-/// method. It can also be destructed into its inner reference type using
-/// [`PacketBufferDyn::into_inner`].
-#[repr(transparent)]
-// TODO: should fix the debug trait
 #[derive(Debug)]
-
-pub struct PacketBufferMut<const HEAD: usize, const TAIL: usize> {
+pub struct PacketBufferMut {
     pub inner: &'static mut dyn PacketBufferDyn,
+    pub current_constraints: (usize, usize),
+    pub constraints: &'static [(usize, usize)],
+    pub constraint_index: usize,
+    pub component: &'static str,
 }
 
-impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
+impl PacketBufferMut {
     #[inline(always)]
-    pub fn new(inner: &'static mut dyn PacketBufferDyn) -> Option<Self> {
-        //     HEAD,
-        //     inner.tailroom(),
-        //     TAIL
-        // );
-        if inner.headroom() >= HEAD && inner.tailroom() >= TAIL {
-            Some(PacketBufferMut { inner })
+    pub fn new(
+        component: &'static str,
+        inner: &'static mut dyn PacketBufferDyn,
+        constraints: &'static [(usize, usize)],
+    ) -> Option<Self> {
+        let first_constraints = constraints[0];
+
+        if inner.headroom() >= first_constraints.0 && inner.tailroom() >= first_constraints.1 {
+            Some(PacketBufferMut {
+                component,
+                inner,
+                constraints,
+                current_constraints: first_constraints,
+                constraint_index: 0,
+            })
         } else {
-            None
+            return None;
         }
     }
 
@@ -164,123 +118,65 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
         self.inner.capacity()
     }
 
-    /// Reduce the advertised headroom of this buffer, without modifying the
-    /// underlying reference.
-    ///
-    /// This uses an assertion to ensure that `NEW_HEAD <= HEAD`. Because this
-    /// assertion exclusively uses compile-time accessible constants, a
-    /// violation of this constraint is going to result in a compile time
-    /// error. However, this error will only be raised when generating the final
-    /// monomorphized types, and as such will not occur on builds using `cargo
-    /// check`, etc. See [1].
-    ///
-    /// [1]: https://github.com/rust-lang/rust/issues/99682
-    #[inline(always)]
-    pub fn reduce_headroom<const NEW_HEAD: usize>(self) -> PacketBufferMut<NEW_HEAD, TAIL> {
-        let _: () = assert!(NEW_HEAD <= HEAD);
-        PacketBufferMut { inner: self.inner }
-    }
-
-    #[inline(always)]
-    pub fn reduce_tailroom<const NEW_TAIL: usize>(self) -> PacketBufferMut<HEAD, NEW_TAIL> {
-        let _: () = assert!(NEW_TAIL <= TAIL);
-        PacketBufferMut { inner: self.inner }
-    }
-
-    /// Attempt to restore the headroom of this buffer in a non-destructive way
-    /// (not discarding any data in the underlying buffer).
-    ///
-    /// For this method to return `Ok(_)`, the underlying buffer's
-    /// [`PacketBufferDyn::headroom`] must be larger or equal to
-    /// `NEW_HEAD`. Otherwise, the old `self` is returned in the `Err(_)`
-    /// variant.
-    #[inline(always)]
-    pub fn restore_headroom<const NEW_HEAD: usize>(
-        self,
-    ) -> Result<PacketBufferMut<NEW_HEAD, TAIL>, Self> {
-        if self.inner.headroom() >= NEW_HEAD {
-            Ok(PacketBufferMut { inner: self.inner })
-        } else {
-            Err(self)
-        }
-    }
-
-    #[inline(always)]
-    pub fn restore_tailroom<const NEW_TAIL: usize>(
-        self,
-    ) -> Result<PacketBufferMut<HEAD, NEW_TAIL>, Self> {
-        if self.inner.tailroom() >= NEW_TAIL {
-            Ok(PacketBufferMut { inner: self.inner })
-        } else {
-            Err(self)
-        }
-    }
-
-    /// Force-reclaim a given amount of headroom in this buffer.
-    ///
-    /// This will ignore any current data stored in the buffer (but not
-    /// immediately overwrite it). It will not move past the tailroom marker.
-    ///
-    // TODO: document return value, and that in the `Err(_)` case the buffer has
-    // not been modified.
-    #[inline(always)]
-    pub fn reclaim_headroom<const NEW_HEAD: usize>(
-        self,
-    ) -> Result<PacketBufferMut<NEW_HEAD, TAIL>, Self> {
-        if self.inner.reclaim_headroom(NEW_HEAD) {
-            Ok(PacketBufferMut { inner: self.inner })
-        } else {
-            Err(self)
-        }
-    }
-
-    #[inline(always)]
-    pub fn reclaim_tailroom<const NEW_TAIL: usize>(
-        self,
-    ) -> Result<PacketBufferMut<HEAD, NEW_TAIL>, Self> {
-        if self.inner.reclaim_tailroom(NEW_TAIL) {
-            Ok(PacketBufferMut { inner: self.inner })
-        } else {
-            Err(self)
-        }
-    }
-
-    pub fn reset<const NEW_HEAD: usize, const NEW_TAIL: usize>(
-        self,
-    ) -> Result<PacketBufferMut<NEW_HEAD, NEW_TAIL>, Self> {
-        if NEW_HEAD + NEW_TAIL < self.inner.capacity() {
-            assert!(self.inner.reset(NEW_HEAD));
-            Ok(PacketBufferMut { inner: self.inner })
-        } else {
-            Err(self)
-        }
-    }
-
     #[inline(always)]
     pub fn downcast<T: PacketBufferDyn>(self) -> Option<&'static mut T> {
         let any_buffer: &'static mut dyn Any = self.inner as _;
         any_buffer.downcast_mut::<T>()
     }
 
-    pub fn prepend<const NEW_HEAD: usize, const N: usize>(
-        self,
-        header: &[u8; N],
-    ) -> PacketBufferMut<NEW_HEAD, TAIL> {
-        // used like this to be a compile time check
-        assert!(NEW_HEAD <= HEAD - N);
+    #[inline(never)]
+    pub fn prepend(self, header: &[u8]) -> PacketBufferMut {
+        let next = self.constraints[self.constraint_index + 1];
+        assert!(
+            next.0 == self.current_constraints.0 - header.len(),
+            "Tried to prepend {} bytes. Current constraints are: head={}, tail={}. Next constraints are: head={}, tail={}",
+            header.len(),
+            self.current_constraints.0,
+            self.current_constraints.1,
+            next.0,
+            next.1
+        );
+
         unsafe {
             self.inner.prepand_unchecked(header);
         }
 
-        self.reduce_headroom()
+        // Re-build self with updated heads and tails
+        let next_constraints_index = self.constraint_index + 1;
+        Self {
+            component: self.component,
+            inner: self.inner,
+            current_constraints: self.constraints[next_constraints_index],
+            constraints: self.constraints,
+            constraint_index: next_constraints_index,
+        }
     }
 
-    // pub fn append<const NEW_TAIL: usize, const N: usize>(
-    pub fn append<const NEW_TAIL: usize>(self, tail: &[u8]) -> PacketBufferMut<HEAD, NEW_TAIL> {
-        assert!(NEW_TAIL <= TAIL - tail.len());
+    #[inline(never)]
+    pub fn append(self, tail: &[u8]) -> PacketBufferMut {
+        let next = self.constraints[self.constraint_index + 1];
+        assert!(
+            next.1 == self.current_constraints.1 - tail.len(),
+            "Tried to append {} bytes. Current constraints are: head={}, tail={}. Next constraints are: head={}, tail={}",
+            tail.len(),
+            self.current_constraints.0,
+            self.current_constraints.1,
+            next.0,
+            next.1
+        );
 
         self.inner.append_from_slice_max(tail);
-        self.reduce_tailroom()
+
+        // Re-build self with updated heads and tails
+        let next_constraints_index = self.constraint_index + 1;
+        Self {
+            component: self.component,
+
+            inner: self.inner,
+            current_constraints: self.constraints[next_constraints_index],
+            constraints: self.constraints,
+            constraint_index: next_constraints_index,
+        }
     }
 
     pub fn copy_from_slice_or_err(&mut self, src: &[u8]) -> Result<(), ErrorCode> {
@@ -293,6 +189,52 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
 
     pub fn payload_mut(&mut self) -> &mut [u8] {
         self.inner.payload_mut()
+    }
+
+    pub fn reclaim_previous_constraints(self) -> Result<PacketBufferMut, Self> {
+        if self.constraint_index == 0 {
+            return Err(self);
+        }
+
+        let previous_constraints_index = self.constraint_index - 1;
+        let previous_constraints = self.constraints[previous_constraints_index];
+
+        if self.inner.reclaim_headroom(previous_constraints.0)
+            && self.inner.reclaim_tailroom(previous_constraints.1)
+        {
+            Ok(PacketBufferMut {
+                component: self.component,
+                inner: self.inner,
+                current_constraints: previous_constraints,
+                constraints: self.constraints,
+                constraint_index: previous_constraints_index,
+            })
+        } else {
+            Err(self)
+        }
+    }
+
+    pub fn restore_previous_constraints(self) -> Result<PacketBufferMut, Self> {
+        if self.constraint_index == 0 {
+            return Err(self);
+        }
+
+        let previous_constraints_index = self.constraint_index - 1;
+        let previous_constraints = self.constraints[previous_constraints_index];
+
+        if self.inner.headroom() >= previous_constraints.0
+            && self.inner.tailroom() >= previous_constraints.1
+        {
+            Ok(PacketBufferMut {
+                component: self.component,
+                inner: self.inner,
+                current_constraints: previous_constraints,
+                constraints: self.constraints,
+                constraint_index: previous_constraints_index,
+            })
+        } else {
+            Err(self)
+        }
     }
 }
 

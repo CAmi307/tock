@@ -17,28 +17,21 @@ use kernel::ErrorCode;
 /// Buffered [`DebugWriter`] implementation using a UART.
 ///
 /// Currently used as a default implementation of DebugWriterComponent.
-pub struct UartDebugWriter<
-    const HEAD: usize,
-    const TAIL: usize,
-    const LOWER_HEAD: usize,
-    const LOWER_TAIL: usize,
-> {
+pub struct UartDebugWriter {
     /// What provides the actual writing mechanism.
-    uart: &'static dyn hil::uart::Transmit<'static, LOWER_HEAD, LOWER_TAIL>,
+    uart: &'static dyn hil::uart::Transmit<'static>,
     /// The buffer that is passed to the writing mechanism.
-    output_buffer: OptionalCell<PacketBufferMut<HEAD, TAIL>>,
+    output_buffer: OptionalCell<PacketBufferMut>,
     /// An internal buffer that is used to hold debug!() calls as they come in.
     internal_buffer: TakeCell<'static, RingBuffer<'static, u8>>,
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    UartDebugWriter<HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl UartDebugWriter {
     pub fn new(
-        uart: &'static dyn hil::uart::Transmit<LOWER_HEAD, LOWER_TAIL>,
-        out_buffer: PacketBufferMut<HEAD, TAIL>,
+        uart: &'static dyn hil::uart::Transmit,
+        out_buffer: PacketBufferMut,
         internal_buffer: &'static mut RingBuffer<'static, u8>,
-    ) -> UartDebugWriter<HEAD, TAIL, LOWER_HEAD, LOWER_TAIL> {
+    ) -> UartDebugWriter {
         UartDebugWriter {
             uart,
             output_buffer: OptionalCell::new(out_buffer),
@@ -47,9 +40,7 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    DebugWriter for UartDebugWriter<HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl DebugWriter for UartDebugWriter {
     fn write(&self, bytes: &[u8], overflow_message: &[u8]) -> usize {
         // If we have a buffer, write to it.
         if let Some(ring_buffer) = self.internal_buffer.take() {
@@ -105,8 +96,8 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
                 if count != 0 {
                     // Transmit the data in the output buffer.
                     // TODO: probably should append some header here and handle the error
-                    let new_buf = out_buffer.reduce_headroom().reduce_tailroom();
-                    let _ = self.uart.transmit_buffer(new_buf, count);
+                    // let new_buf = out_buffer.reduce_headroom().reduce_tailroom();
+                    let _ = self.uart.transmit_buffer(out_buffer, count);
 
                     // if let Err((_err, buf)) = self.uart.transmit_buffer(new_buf, count) {
                     //     self.output_buffer.put(Some(buf));
@@ -136,19 +127,20 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    hil::uart::TransmitClient<LOWER_HEAD, LOWER_TAIL>
-    for UartDebugWriter<HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl hil::uart::TransmitClient for UartDebugWriter {
     fn transmitted_buffer(
         &self,
-        buffer: PacketBufferMut<LOWER_HEAD, LOWER_TAIL>,
+        buffer: PacketBufferMut,
         _tx_len: usize,
         _rcode: Result<(), ErrorCode>,
     ) {
         // Replace this buffer since we are done with it.
-        let new_buf = buffer.reset().unwrap();
-        self.output_buffer.replace(new_buf);
+        // let new_buf = buffer
+        //     .reclaim_previous_constraints()
+        //     .unwrap()
+        //     .reclaim_previous_constraints()
+        //     .unwrap();
+        self.output_buffer.replace(buffer);
 
         if self.internal_buffer.map_or(false, |buf| buf.has_elements()) {
             // Buffer not empty, go around again
@@ -158,9 +150,7 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
     fn transmitted_word(&self, _rcode: Result<(), ErrorCode>) {}
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize> IoWrite
-    for UartDebugWriter<HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl IoWrite for UartDebugWriter {
     fn write(&mut self, bytes: &[u8]) -> usize {
         const FULL_MSG: &[u8] = b"\n*** DEBUG BUFFER FULL ***\n";
         self.internal_buffer.map_or(0, |ring_buffer| {

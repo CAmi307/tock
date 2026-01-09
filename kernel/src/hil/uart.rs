@@ -84,10 +84,7 @@ pub enum Error {
 /// Trait for a full UART device.
 ///
 /// This includes configuring the bus, transmitting data, and receiving data.
-pub trait Uart<'a, const HEAD: usize, const TAIL: usize>:
-    Configure + Transmit<'a, HEAD, TAIL> + Receive<'a>
-{
-}
+pub trait Uart<'a>: Configure + Transmit<'a> + Receive<'a> {}
 
 /// Trait for sending and receiving on UART.
 ///
@@ -95,51 +92,22 @@ pub trait Uart<'a, const HEAD: usize, const TAIL: usize>:
 ///
 /// Capsules can use this to require a UART device that can both send and
 /// receive but do not need the ability to configure the bus settings.
-pub trait UartData<'a, const HEAD: usize, const TAIL: usize>:
-    Transmit<'a, HEAD, TAIL> + Receive<'a>
-{
-}
+pub trait UartData<'a>: Transmit<'a> + Receive<'a> {}
 
 /// Trait for a full advanced UART device.
 ///
 /// This includes configuring the bus, transmitting data, and the advanced
 /// reception operations.
-pub trait UartAdvanced<'a, const HEAD: usize, const TAIL: usize>:
-    Configure + Transmit<'a, HEAD, TAIL> + ReceiveAdvanced<'a>
-{
-}
+pub trait UartAdvanced<'a>: Configure + Transmit<'a> + ReceiveAdvanced<'a> {}
 
 /// Trait for both receive and transmit callbacks.
-pub trait Client<const HEAD: usize, const TAIL: usize>:
-    ReceiveClient + TransmitClient<HEAD, TAIL>
-{
-}
+pub trait Client: ReceiveClient + TransmitClient {}
 
 // Provide blanket implementations for all trait groups
-impl<
-        'a,
-        T: Configure + Transmit<'a, HEAD, TAIL> + Receive<'a>,
-        const HEAD: usize,
-        const TAIL: usize,
-    > Uart<'a, HEAD, TAIL> for T
-{
-}
-impl<'a, const HEAD: usize, const TAIL: usize, T: Transmit<'a, HEAD, TAIL> + Receive<'a>>
-    UartData<'a, HEAD, TAIL> for T
-{
-}
-impl<
-        'a,
-        const HEAD: usize,
-        const TAIL: usize,
-        T: Configure + Transmit<'a, HEAD, TAIL> + ReceiveAdvanced<'a>,
-    > UartAdvanced<'a, HEAD, TAIL> for T
-{
-}
-impl<const HEAD: usize, const TAIL: usize, T: ReceiveClient + TransmitClient<HEAD, TAIL>>
-    Client<HEAD, TAIL> for T
-{
-}
+impl<'a, T: Configure + Transmit<'a> + Receive<'a>> Uart<'a> for T {}
+impl<'a, T: Transmit<'a> + Receive<'a>> UartData<'a> for T {}
+impl<'a, T: Configure + Transmit<'a> + ReceiveAdvanced<'a>> UartAdvanced<'a> for T {}
+impl<T: ReceiveClient + TransmitClient> Client for T {}
 
 /// Trait for configuring a UART.
 pub trait Configure {
@@ -159,10 +127,10 @@ pub trait Configure {
 }
 
 /// Trait for sending data via a UART bus.
-pub trait Transmit<'a, const HEAD: usize, const TAIL: usize> {
+pub trait Transmit<'a> {
     /// Set the transmit client, which will be called when transmissions
     /// complete.
-    fn set_transmit_client(&self, client: &'a dyn TransmitClient<HEAD, TAIL>);
+    fn set_transmit_client(&self, client: &'a dyn TransmitClient);
 
     /// Transmit a buffer of data.
     ///
@@ -193,9 +161,9 @@ pub trait Transmit<'a, const HEAD: usize, const TAIL: usize> {
     fn transmit_buffer(
         &self,
         // AMALIA: nu ar trebui sa fie referinta mutable aici????
-        tx_buffer: PacketBufferMut<HEAD, TAIL>,
+        tx_buffer: PacketBufferMut,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)>;
+    ) -> Result<(), (ErrorCode, PacketBufferMut)>;
 
     /// Transmit a single word of data asynchronously.
     ///
@@ -315,7 +283,7 @@ pub trait Receive<'a> {
 
 /// Trait implemented by a UART transmitter to receive callbacks when
 /// operations complete.
-pub trait TransmitClient<const HEAD: usize, const TAIL: usize> {
+pub trait TransmitClient {
     /// A call to [`Transmit::transmit_word`] completed.
     ///
     /// A call to [`Transmit::transmit_word`] or [`Transmit::transmit_buffer`]
@@ -353,7 +321,7 @@ pub trait TransmitClient<const HEAD: usize, const TAIL: usize> {
     /// - `Err(FAIL)`: The transmission failed in some way.
     fn transmitted_buffer(
         &self,
-        tx_buffer: PacketBufferMut<HEAD, TAIL>,
+        tx_buffer: PacketBufferMut,
         tx_len: usize,
         rval: Result<(), ErrorCode>,
     );

@@ -58,33 +58,20 @@ use kernel::{debug, ErrorCode};
 
 pub const RX_BUF_LEN: usize = 64;
 
-pub struct MuxUart<
-    'a,
-    const UART_HEAD: usize,
-    const UART_TAIL: usize,
-    const DEVICE_HEAD: usize,
-    const DEVICE_TAIL: usize,
-> {
-    uart: &'a dyn uart::Uart<'a, UART_HEAD, UART_TAIL>,
+pub struct MuxUart<'a> {
+    uart: &'a dyn uart::Uart<'a>,
     speed: u32,
-    devices: List<'a, UartDevice<'a, DEVICE_HEAD, DEVICE_TAIL, UART_HEAD, UART_TAIL>>,
-    inflight: OptionalCell<&'a UartDevice<'a, DEVICE_HEAD, DEVICE_TAIL, UART_HEAD, UART_TAIL>>,
+    devices: List<'a, UartDevice<'a>>,
+    inflight: OptionalCell<&'a UartDevice<'a>>,
     buffer: TakeCell<'static, [u8]>,
     completing_read: Cell<bool>,
     deferred_call: DeferredCall,
 }
 
-impl<
-        const UART_HEAD: usize,
-        const UART_TAIL: usize,
-        const DEVICE_HEAD: usize,
-        const DEVICE_TAIL: usize,
-    > uart::TransmitClient<UART_HEAD, UART_TAIL>
-    for MuxUart<'_, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
-{
+impl uart::TransmitClient for MuxUart<'_> {
     fn transmitted_buffer(
         &self,
-        tx_buffer: PacketBufferMut<UART_HEAD, UART_TAIL>,
+        tx_buffer: PacketBufferMut,
         tx_len: usize,
         rcode: Result<(), ErrorCode>,
     ) {
@@ -95,19 +82,21 @@ impl<
             //     .unwrap()
             //     .restore_tailroom::<DEVICE_TAIL>()
             //     .unwrap();
-            device.transmitted_buffer(tx_buffer, tx_len, rcode);
+
+            // hprintln!("MUX UART: TRANSMITTED BUFFER CALLBACK");
+            let new_buf = tx_buffer
+                .reclaim_previous_constraints()
+                .unwrap()
+                .reclaim_previous_constraints()
+                .unwrap();
+            // hprintln!("MUX UART: TRANSMITTED BUFFER CALLBACK OK");
+            device.transmitted_buffer(new_buf, tx_len, rcode);
         });
         self.do_next_op();
     }
 }
 
-impl<
-        const UART_HEAD: usize,
-        const UART_TAIL: usize,
-        const DEVICE_HEAD: usize,
-        const DEVICE_TAIL: usize,
-    > uart::ReceiveClient for MuxUart<'_, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
-{
+impl uart::ReceiveClient for MuxUart<'_> {
     fn received_buffer(
         &self,
         buffer: &'static mut [u8],
@@ -241,20 +230,8 @@ impl<
     }
 }
 
-impl<
-        'a,
-        const UART_HEAD: usize,
-        const UART_TAIL: usize,
-        const DEVICE_HEAD: usize,
-        const DEVICE_TAIL: usize,
-    > MuxUart<'a, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
-{
-    pub fn new(
-        uart: &'a dyn uart::Uart<'a, UART_HEAD, UART_TAIL>,
-        buffer: &'static mut [u8],
-        speed: u32,
-    ) -> MuxUart<'a, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL> {
-        assert!(UART_HEAD + 1 <= DEVICE_HEAD);
+impl<'a> MuxUart<'a> {
+    pub fn new(uart: &'a dyn uart::Uart<'a>, buffer: &'static mut [u8], speed: u32) -> MuxUart<'a> {
         MuxUart {
             uart,
             speed,
@@ -294,19 +271,21 @@ impl<
 
                                 let header = if node.is_console { 1_u8 } else { 0_u8 };
 
-                                let new_buf =
-                                    buf.prepend::<UART_HEAD, 1>(&[header]).append(&[255 as u8]);
+                                let new_buf = buf.prepend(&[header]).append(&[255 as u8]);
 
                                 match self.uart.transmit_buffer(new_buf, len) {
                                     Ok(()) => {
+                                        // hprintln!("MUX UART: TRANSMIT BUFFER OK");
                                         self.inflight.set(node);
                                     }
                                     Err((ecode, buf)) => {
-                                        let buffer = buf
-                                            .reclaim_headroom()
+                                        // hprintln!("MUX UART: TRANSMIT BUFFER ERROR {:?}", ecode);
+                                        let buffer: PacketBufferMut = buf
+                                            .reclaim_previous_constraints()
                                             .unwrap()
-                                            .reclaim_tailroom()
+                                            .reclaim_previous_constraints()
                                             .unwrap();
+                                        // hprintln!("MUX UART: Reclaimed buffer after error");
 
                                         // let buffer = buf.reset().unwrap();
                                         node.tx_client.map(move |client| {
@@ -380,13 +359,7 @@ impl<
     }
 }
 
-impl<
-        const UART_HEAD: usize,
-        const UART_TAIL: usize,
-        const DEVICE_HEAD: usize,
-        const DEVICE_TAIL: usize,
-    > DeferredCallClient for MuxUart<'_, UART_HEAD, UART_TAIL, DEVICE_HEAD, DEVICE_TAIL>
-{
+impl DeferredCallClient for MuxUart<'_> {
     fn handle_deferred_call(&self) {
         self.do_next_op();
     }
@@ -409,44 +382,27 @@ enum UartDeviceReceiveState {
     Aborting,
 }
 
-pub struct UartDevice<
-    'a,
-    const HEAD: usize,
-    const TAIL: usize,
-    const UARTE_HEAD: usize,
-    const UARTE_TAIL: usize,
-> {
+pub struct UartDevice<'a> {
     state: Cell<UartDeviceReceiveState>,
-    mux: &'a MuxUart<'a, UARTE_HEAD, UARTE_TAIL, HEAD, TAIL>,
+    mux: &'a MuxUart<'a>,
     receiver: bool, // Whether or not to pass this UartDevice incoming messages.
     is_console: bool,
 
     // tx_buffer: TakeCell<'static, [u8]>,
-    tx_buffer: OptionalCell<PacketBufferMut<HEAD, TAIL>>,
+    tx_buffer: OptionalCell<PacketBufferMut>,
 
     transmitting: Cell<bool>,
     rx_buffer: TakeCell<'static, [u8]>,
     rx_position: Cell<usize>,
     rx_len: Cell<usize>,
     operation: OptionalCell<Operation>,
-    next: ListLink<'a, UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>>,
+    next: ListLink<'a, UartDevice<'a>>,
     rx_client: OptionalCell<&'a dyn uart::ReceiveClient>,
-    tx_client: OptionalCell<&'a dyn uart::TransmitClient<HEAD, TAIL>>,
+    tx_client: OptionalCell<&'a dyn uart::TransmitClient>,
 }
 
-impl<
-        'a,
-        const HEAD: usize,
-        const TAIL: usize,
-        const UARTE_HEAD: usize,
-        const UARTE_TAIL: usize,
-    > UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
-{
-    pub fn new(
-        mux: &'a MuxUart<'a, UARTE_HEAD, UARTE_TAIL, HEAD, TAIL>,
-        receiver: bool,
-        is_console: bool,
-    ) -> UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL> {
+impl<'a> UartDevice<'a> {
+    pub fn new(mux: &'a MuxUart<'a>, receiver: bool, is_console: bool) -> UartDevice<'a> {
         UartDevice {
             state: Cell::new(UartDeviceReceiveState::Idle),
             mux,
@@ -470,25 +426,24 @@ impl<
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const UARTE_HEAD: usize, const UARTE_TAIL: usize>
-    uart::TransmitClient<UARTE_HEAD, UARTE_TAIL>
-    for UartDevice<'_, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
-{
+impl uart::TransmitClient for UartDevice<'_> {
     fn transmitted_buffer(
         &self,
-        tx_buffer: PacketBufferMut<UARTE_HEAD, UARTE_TAIL>,
+        tx_buffer: PacketBufferMut,
         tx_len: usize,
         rcode: Result<(), ErrorCode>,
     ) {
         self.tx_client.map(move |client| {
             self.transmitting.set(false);
 
-            let new_buf = tx_buffer
-                .reclaim_headroom::<HEAD>()
-                .unwrap()
-                .reclaim_tailroom::<TAIL>()
-                .unwrap();
-            client.transmitted_buffer(new_buf, tx_len, rcode);
+            // hprintln!("UART DEVICE: TRANSMITTED BUFFER CALLBACK");
+            // let new_buf = tx_buffer
+            //     .reclaim_previous_constraints()
+            //     .unwrap()
+            //     .reclaim_previous_constraints()
+            //     .unwrap();
+            // hprintln!("UART DEVICE: TRANSMITTED BUFFER CALLBACK OK");
+            client.transmitted_buffer(tx_buffer, tx_len, rcode);
         });
     }
 
@@ -499,9 +454,7 @@ impl<const HEAD: usize, const TAIL: usize, const UARTE_HEAD: usize, const UARTE_
         });
     }
 }
-impl<const HEAD: usize, const TAIL: usize, const UARTE_HEAD: usize, const UARTE_TAIL: usize>
-    uart::ReceiveClient for UartDevice<'_, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
-{
+impl uart::ReceiveClient for UartDevice<'_> {
     fn received_buffer(
         &self,
         rx_buffer: &'static mut [u8],
@@ -516,29 +469,14 @@ impl<const HEAD: usize, const TAIL: usize, const UARTE_HEAD: usize, const UARTE_
     }
 }
 
-impl<
-        'a,
-        const HEAD: usize,
-        const TAIL: usize,
-        const UARTE_HEAD: usize,
-        const UARTE_TAIL: usize,
-    > ListNode<'a, UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>>
-    for UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
-{
-    fn next(&'a self) -> &'a ListLink<'a, UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>> {
+impl<'a> ListNode<'a, UartDevice<'a>> for UartDevice<'a> {
+    fn next(&'a self) -> &'a ListLink<'a, UartDevice<'a>> {
         &self.next
     }
 }
 
-impl<
-        'a,
-        const HEAD: usize,
-        const TAIL: usize,
-        const UARTE_HEAD: usize,
-        const UARTE_TAIL: usize,
-    > uart::Transmit<'a, HEAD, TAIL> for UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
-{
-    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient<HEAD, TAIL>) {
+impl<'a> uart::Transmit<'a> for UartDevice<'a> {
+    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
         self.tx_client.set(client);
     }
 
@@ -549,9 +487,9 @@ impl<
     /// Transmit data.
     fn transmit_buffer(
         &self,
-        tx_data: PacketBufferMut<HEAD, TAIL>,
+        tx_data: PacketBufferMut,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut)> {
         if tx_len == 0 {
             Err((ErrorCode::SIZE, tx_data))
         } else if self.transmitting.get() {
@@ -577,14 +515,7 @@ impl<
     }
 }
 
-impl<
-        'a,
-        const HEAD: usize,
-        const TAIL: usize,
-        const UARTE_HEAD: usize,
-        const UARTE_TAIL: usize,
-    > uart::Receive<'a> for UartDevice<'a, HEAD, TAIL, UARTE_HEAD, UARTE_TAIL>
-{
+impl<'a> uart::Receive<'a> for UartDevice<'a> {
     fn set_receive_client(&self, client: &'a dyn uart::ReceiveClient) {
         self.rx_client.set(client);
     }

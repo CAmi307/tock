@@ -233,16 +233,12 @@ pub struct ProcessConsole<
     const COMMAND_HISTORY_LEN: usize,
     A: Alarm<'a>,
     C: ProcessManagementCapability + ProcessStartCapability,
-    const HEAD: usize,
-    const TAIL: usize,
-    const LOWER_HEAD: usize,
-    const LOWER_TAIL: usize,
 > {
-    uart: &'a dyn uart::UartData<'a, LOWER_HEAD, LOWER_TAIL>,
+    uart: &'a dyn uart::UartData<'a>,
     alarm: &'a A,
     process_printer: &'a dyn ProcessPrinter,
     tx_in_progress: Cell<bool>,
-    tx_buffer: OptionalCell<PacketBufferMut<HEAD, TAIL>>,
+    tx_buffer: OptionalCell<PacketBufferMut>,
     queue_buffer: TakeCell<'static, [u8]>,
     queue_size: Cell<usize>,
     writer_state: Cell<WriterState>,
@@ -449,17 +445,13 @@ impl<
         const COMMAND_HISTORY_LEN: usize,
         A: Alarm<'a>,
         C: ProcessManagementCapability + ProcessStartCapability,
-        const HEAD: usize,
-        const TAIL: usize,
-        const LOWER_HEAD: usize,
-        const LOWER_TAIL: usize,
-    > ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+    > ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C>
 {
     pub fn new(
-        uart: &'a dyn uart::UartData<'a, LOWER_HEAD, LOWER_TAIL>,
+        uart: &'a dyn uart::UartData<'a>,
         alarm: &'a A,
         process_printer: &'a dyn ProcessPrinter,
-        tx_buffer: PacketBufferMut<HEAD, TAIL>,
+        tx_buffer: PacketBufferMut,
         rx_buffer: &'static mut [u8],
         queue_buffer: &'static mut [u8],
         cmd_buffer: &'static mut [u8],
@@ -468,7 +460,7 @@ impl<
         kernel_addresses: KernelAddresses,
         reset_function: Option<fn() -> !>,
         capability: C,
-    ) -> ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL> {
+    ) -> ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C> {
         ProcessConsole {
             uart,
             alarm,
@@ -780,6 +772,7 @@ impl<
 
                 match cmd_str {
                     Ok(s) => {
+                        // hprintln!("Process console: received command: {}", s);
                         let clean_str = s.trim();
 
                         // Check if the command history is enabled by the user
@@ -1086,8 +1079,9 @@ impl<
                 // .reduce_headroom::<LOWER_HEAD>()
                 // .reduce_tailroom::<LOWER_TAIL>();
 
-                let new_buf = buffer.prepend(&[1 as u8]).reduce_tailroom();
-                let _ = self.uart.transmit_buffer(new_buf, 1);
+                let new_buf = buffer.prepend(&[1 as u8]);
+                let res = self.uart.transmit_buffer(new_buf, 1);
+                // hprintln!("Process console: Transmitting buffer: {:?}", res);
             });
             Ok(())
         }
@@ -1123,10 +1117,9 @@ impl<
                 //     .reduce_headroom::<LOWER_HEAD>()
                 //     .reduce_tailroom::<LOWER_TAIL>();
 
-                let new_buf = buffer
-                    .prepend::<LOWER_HEAD, 1>(&[1 as u8])
-                    .reduce_tailroom();
-                let _ = self.uart.transmit_buffer(new_buf, len);
+                let new_buf = buffer.prepend(&[1 as u8]);
+                let res = self.uart.transmit_buffer(new_buf, len);
+                // hprintln!("Process console: Transmitting buffer: {:?}", res);
             });
             Ok(())
         }
@@ -1181,8 +1174,9 @@ impl<
                         // let new_buf = txbuf
                         //     .reduce_headroom::<LOWER_HEAD>()
                         //     .reduce_tailroom::<LOWER_TAIL>();
-                        let new_buf = txbuf.prepend(&[1 as u8]).reduce_tailroom();
-                        let _ = self.uart.transmit_buffer(new_buf, txlen);
+                        let new_buf = txbuf.prepend(&[1 as u8]);
+                        let res = self.uart.transmit_buffer(new_buf, txlen);
+                        // hprintln!("Process console: Transmitting buffer: {:?}", res);
                         Ok(txlen)
                     })
             } else {
@@ -1198,12 +1192,7 @@ impl<
         const COMMAND_HISTORY_LEN: usize,
         A: Alarm<'a>,
         C: ProcessManagementCapability + ProcessStartCapability,
-        const HEAD: usize,
-        const TAIL: usize,
-        const LOWER_HEAD: usize,
-        const LOWER_TAIL: usize,
-    > AlarmClient
-    for ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+    > AlarmClient for ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C>
 {
     fn alarm(&self) {
         self.prompt();
@@ -1218,16 +1207,11 @@ impl<
         const COMMAND_HISTORY_LEN: usize,
         A: Alarm<'a>,
         C: ProcessManagementCapability + ProcessStartCapability,
-        const HEAD: usize,
-        const TAIL: usize,
-        const LOWER_HEAD: usize,
-        const LOWER_TAIL: usize,
-    > uart::TransmitClient<LOWER_HEAD, LOWER_TAIL>
-    for ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+    > uart::TransmitClient for ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C>
 {
     fn transmitted_buffer(
         &self,
-        buffer: PacketBufferMut<LOWER_HEAD, LOWER_TAIL>,
+        buffer: PacketBufferMut,
         _tx_len: usize,
         _rcode: Result<(), ErrorCode>,
     ) {
@@ -1236,7 +1220,8 @@ impl<
         //     .unwrap()
         //     .restore_tailroom::<TAIL>()
         //     .unwrap();
-        let new_buf = buffer.reset().unwrap();
+        // hprintln!("Process console: transmitted buffer callback");
+        let new_buf = buffer.reclaim_previous_constraints().unwrap();
         self.tx_buffer.replace(new_buf);
         self.tx_in_progress.set(false);
 
@@ -1267,12 +1252,7 @@ impl<
         const COMMAND_HISTORY_LEN: usize,
         A: Alarm<'a>,
         C: ProcessManagementCapability + ProcessStartCapability,
-        const HEAD: usize,
-        const TAIL: usize,
-        const LOWER_HEAD: usize,
-        const LOWER_TAIL: usize,
-    > uart::ReceiveClient
-    for ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+    > uart::ReceiveClient for ProcessConsole<'a, COMMAND_HISTORY_LEN, A, C>
 {
     fn received_buffer(
         &self,

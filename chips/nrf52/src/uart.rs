@@ -164,11 +164,11 @@ register_bitfields! [u32,
 /// UARTE
 // It should never be instanced outside this module but because a static mutable reference to it
 // is exported outside this module it must be `pub`
-pub struct Uarte<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
+pub struct Uarte<'a> {
     registers: StaticRef<UarteRegisters>,
-    tx_client: OptionalCell<&'a dyn uart::TransmitClient<HEAD, TAIL>>,
+    tx_client: OptionalCell<&'a dyn uart::TransmitClient>,
     // AMALIA: ultimu layer va tine un PacketSliceMut, restul vor tine PacketBufferMut
-    tx_buffer: TakeCell<'static, PacketSliceMut>,
+    tx_buffer: OptionalCell<PacketBufferMut>,
     tx_len: Cell<usize>,
     tx_remaining_bytes: Cell<usize>,
     rx_client: OptionalCell<&'a dyn uart::ReceiveClient>,
@@ -183,14 +183,14 @@ pub struct UARTParams {
     pub baud_rate: u32,
 }
 
-impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
+impl<'a> Uarte<'a> {
     /// Constructor
     // This should only be constructed once
-    pub const fn new(regs: StaticRef<UarteRegisters>) -> Uarte<'a, HEAD, TAIL> {
+    pub const fn new(regs: StaticRef<UarteRegisters>) -> Uarte<'a> {
         Uarte {
             registers: regs,
             tx_client: OptionalCell::empty(),
-            tx_buffer: kernel::utilities::cells::TakeCell::empty(),
+            tx_buffer: OptionalCell::empty(),
             tx_len: Cell::new(0),
             tx_remaining_bytes: Cell::new(0),
             rx_client: OptionalCell::empty(),
@@ -314,14 +314,12 @@ impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
 
             // All bytes have been transmitted
             if rem == 0 {
+                // hprintln!("HW UART: All bytes transmitted");
                 // Signal client write done
                 self.tx_client.map(|client| {
                     self.tx_buffer.take().map(|tx_buffer| {
-                        client.transmitted_buffer(
-                            PacketBufferMut::new(tx_buffer).unwrap(),
-                            self.tx_len.get(),
-                            Ok(()),
-                        );
+                        // hprintln!("HW UART: Calling transmitted_buffer callback");
+                        client.transmitted_buffer(tx_buffer, self.tx_len.get(), Ok(()));
                     });
                 });
             } else {
@@ -423,21 +421,13 @@ impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
     }
 
     fn set_tx_dma_pointer_to_buffer(&self) {
-        self.tx_buffer.map(|tx_buffer| {
+        let buf: Option<PacketBufferMut> = self.tx_buffer.take();
+        buf.map(|tx_buffer: PacketBufferMut| {
             // --> v2
-            let headroom = tx_buffer.headroom();
-            let tailroom = tx_buffer.tailroom();
-            let capacity = tx_buffer.capacity();
-            self.registers.txd_ptr.set(
-                tx_buffer.data_slice_mut()[headroom + self.offset.get()..capacity - tailroom]
-                    .as_ptr() as u32,
-            );
-
-            // --> v1
-
-            // self.registers
-            //     .txd_ptr
-            //     .set(tx_buffer.data_slice_mut()[self.offset.get()..].as_ptr() as u32);
+            self.registers
+                .txd_ptr
+                .set(tx_buffer.payload()[self.offset.get()..].as_ptr() as u32);
+            self.tx_buffer.replace(tx_buffer);
         });
     }
 
@@ -450,7 +440,7 @@ impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
     }
 
     // Helper function used by both transmit_word and transmit_buffer
-    fn setup_buffer_transmit(&self, buf: PacketBufferMut<HEAD, TAIL>) {
+    fn setup_buffer_transmit(&self, buf: PacketBufferMut) {
         let len = buf.payload().len();
 
         //     buf.headroom(),
@@ -462,7 +452,7 @@ impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
         // self.tx_len.set(tx_len);
         self.tx_len.set(len);
         self.offset.set(0);
-        self.tx_buffer.replace(buf.downcast().unwrap());
+        self.tx_buffer.replace(buf);
         self.set_tx_dma_pointer_to_buffer();
 
         self.registers
@@ -475,25 +465,24 @@ impl<'a, const HEAD: usize, const TAIL: usize> Uarte<'a, HEAD, TAIL> {
     }
 }
 
-impl<'a, const HEAD: usize, const TAIL: usize> uart::Transmit<'a, HEAD, TAIL>
-    for Uarte<'a, HEAD, TAIL>
-{
-    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient<HEAD, TAIL>) {
+impl<'a> uart::Transmit<'a> for Uarte<'a> {
+    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_data: PacketBufferMut<HEAD, TAIL>,
+        tx_data: PacketBufferMut,
         // AMALIA: nu stiu daca pot sa scot tx_len de aici? care e diferenta intre tx_data.len si tx_len??
         // _tx_len: usize,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut)> {
         if tx_len == 0 || tx_len > tx_data.capacity() {
             Err((ErrorCode::SIZE, tx_data))
         } else if self.tx_buffer.is_some() {
             Err((ErrorCode::BUSY, tx_data))
         } else {
+            // hprintln!("HW UART: Received transmit_buffer call");
             self.setup_buffer_transmit(tx_data);
             Ok(())
         }
@@ -508,7 +497,7 @@ impl<'a, const HEAD: usize, const TAIL: usize> uart::Transmit<'a, HEAD, TAIL>
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize> uart::Configure for Uarte<'_, HEAD, TAIL> {
+impl uart::Configure for Uarte<'_> {
     fn configure(&self, params: uart::Parameters) -> Result<(), ErrorCode> {
         // These could probably be implemented, but are currently ignored, so
         // throw an error.
@@ -528,7 +517,7 @@ impl<const HEAD: usize, const TAIL: usize> uart::Configure for Uarte<'_, HEAD, T
     }
 }
 
-impl<'a, const HEAD: usize, const TAIL: usize> uart::Receive<'a> for Uarte<'a, HEAD, TAIL> {
+impl<'a> uart::Receive<'a> for Uarte<'a> {
     fn set_receive_client(&self, client: &'a dyn uart::ReceiveClient) {
         self.rx_client.set(client);
     }

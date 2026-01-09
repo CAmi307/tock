@@ -102,14 +102,8 @@ pub struct App {
     read_len: usize,
 }
 
-pub struct Console<
-    'a,
-    const HEAD: usize,
-    const TAIL: usize,
-    const LOWER_HEAD: usize,
-    const LOWER_TAIL: usize,
-> {
-    uart: &'a dyn uart::UartData<'a, LOWER_HEAD, LOWER_TAIL>,
+pub struct Console<'a> {
+    uart: &'a dyn uart::UartData<'a>,
     apps: Grant<
         App,
         UpcallCount<{ upcall::COUNT }>,
@@ -117,22 +111,15 @@ pub struct Console<
         AllowRwCount<{ rw_allow::COUNT }>,
     >,
     tx_in_progress: OptionalCell<ProcessId>,
-    tx_buffer: OptionalCell<PacketBufferMut<HEAD, TAIL>>,
+    tx_buffer: OptionalCell<PacketBufferMut>,
     rx_in_progress: OptionalCell<ProcessId>,
     rx_buffer: TakeCell<'static, [u8]>,
 }
 
-impl<
-        'a,
-        const HEAD: usize,
-        const TAIL: usize,
-        const LOWER_HEAD: usize,
-        const LOWER_TAIL: usize,
-    > Console<'a, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl<'a> Console<'a> {
     pub fn new(
-        uart: &'a dyn uart::UartData<'a, LOWER_HEAD, LOWER_TAIL>,
-        tx_buffer: PacketBufferMut<HEAD, TAIL>,
+        uart: &'a dyn uart::UartData<'a>,
+        tx_buffer: PacketBufferMut,
         rx_buffer: &'static mut [u8],
         grant: Grant<
             App,
@@ -140,7 +127,7 @@ impl<
             AllowRoCount<{ ro_allow::COUNT }>,
             AllowRwCount<{ rw_allow::COUNT }>,
         >,
-    ) -> Console<'a, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL> {
+    ) -> Console<'a> {
         Console {
             uart,
             apps: grant,
@@ -241,16 +228,14 @@ impl<
 
                 // TODO: Check and make sure that the process id should not be greater than 256
                 let process_id: [u8; 1] = (processid.id() as u8).to_ne_bytes();
-                let buf = tx_buffer
-                    .prepend::<LOWER_HEAD, 1>(&process_id)
-                    .reduce_tailroom();
+                let buf = tx_buffer.prepend(&process_id);
                 if let Err((_e, tx_buffer)) = self.uart.transmit_buffer(buf, transaction_len) {
                     // The UART didn't start, so we will not get a transmit
                     // done callback. Need to signal the app now.
                     let buf = tx_buffer
-                        .restore_headroom::<HEAD>()
+                        .restore_previous_constraints()
                         .unwrap()
-                        .restore_tailroom::<TAIL>()
+                        .restore_previous_constraints()
                         .unwrap();
                     self.tx_buffer.replace(buf);
                     self.tx_in_progress.clear();
@@ -305,9 +290,7 @@ impl<
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    SyscallDriver for Console<'_, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl SyscallDriver for Console<'_> {
     /// Initiate serial transfers
     ///
     /// ### `command_num`
@@ -362,13 +345,10 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    uart::TransmitClient<LOWER_HEAD, LOWER_TAIL>
-    for Console<'_, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl uart::TransmitClient for Console<'_> {
     fn transmitted_buffer(
         &self,
-        buffer: PacketBufferMut<LOWER_HEAD, LOWER_TAIL>,
+        buffer: PacketBufferMut,
         _tx_len: usize,
         _rcode: Result<(), ErrorCode>,
     ) {
@@ -377,7 +357,7 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
 
         //     .unwrap()
         //     .restore_tailroom::<TAIL>()
-        let new_buf = buffer.reset::<HEAD, TAIL>().unwrap();
+        let new_buf = buffer.reclaim_previous_constraints().unwrap();
         self.tx_buffer.replace(new_buf);
 
         self.tx_in_progress.take().map(|processid| {
@@ -417,9 +397,7 @@ impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_
     }
 }
 
-impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
-    uart::ReceiveClient for Console<'_, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
-{
+impl uart::ReceiveClient for Console<'_> {
     fn received_buffer(
         &self,
         buffer: &'static mut [u8],

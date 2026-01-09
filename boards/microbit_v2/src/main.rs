@@ -100,7 +100,7 @@ pub struct MicroBit {
     >,
     eui64: &'static capsules_extra::eui64::Eui64,
     ieee802154: &'static Ieee802154RawDriver,
-    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
+    console: &'static capsules_core::console::Console<'static>,
     gpio: &'static capsules_core::gpio::GPIO<'static, nrf52::gpio::GPIOPin<'static>>,
     led: &'static capsules_core::led::LedDriver<
         'static,
@@ -458,7 +458,7 @@ unsafe fn start() -> (
         .finalize(components::uart_mux_component_static!());
 
     // Setup the console.
-    let console: &Console<'static, 2, 1, 1, 1> = components::console::ConsoleComponent::new(
+    let console: &Console<'static> = components::console::ConsoleComponent::new(
         board_kernel,
         capsules_core::console::DRIVER_NUM,
         uart_mux,
