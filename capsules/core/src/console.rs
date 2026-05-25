@@ -239,8 +239,13 @@ impl<
                 //     .reduce_headroom::<LOWER_HEAD>()
                 //     .reduce_tailroom::<LOWER_TAIL>();
 
-                // TODO: Check and make sure that the process id should not be greater than 256
-                let process_id: [u8; 1] = (processid.id() as u8).to_ne_bytes();
+                let process_id = processid.id();
+                if process_id > u8::MAX as usize {
+                    self.tx_buffer.replace(tx_buffer);
+                    self.tx_in_progress.clear();
+                    return;
+                }
+                let process_id: [u8; 1] = (process_id as u8).to_ne_bytes();
                 let buf = tx_buffer
                     .prepend::<LOWER_HEAD, 1>(&process_id)
                     .reduce_tailroom();

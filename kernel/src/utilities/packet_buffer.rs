@@ -120,7 +120,7 @@ pub struct PacketBufferMut<const HEAD: usize, const TAIL: usize> {
 }
 
 impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
-    #[inline(always)]
+    #[inline(never)]
     pub fn new(inner: &'static mut dyn PacketBufferDyn) -> Option<Self> {
         //     HEAD,
         //     inner.tailroom(),
@@ -138,25 +138,26 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
     ///
     /// Length of the allocated data in this buffer (excluding head- and
     /// tailroom).
-    #[inline(always)]
+    #[inline(never)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Actual available headroom in the underlying buffer. Must be greater or
     /// equal to the `HEAD` parameter.
-    #[inline(always)]
+    #[inline(never)]
     pub fn headroom(&self) -> usize {
         self.inner.headroom()
     }
 
     /// Actual available tailroom in the underlying buffer. Must be greater or
     /// equal to the `TAIL` parameter.
-    #[inline(always)]
+    #[inline(never)]
     pub fn tailroom(&self) -> usize {
         self.inner.tailroom()
     }
 
+    #[inline(never)]
     pub fn capacity(&self) -> usize {
         self.inner.capacity()
     }
@@ -172,13 +173,13 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
     /// check`, etc. See [1].
     ///
     /// [1]: https://github.com/rust-lang/rust/issues/99682
-    #[inline(always)]
+    #[inline(never)]
     pub fn reduce_headroom<const NEW_HEAD: usize>(self) -> PacketBufferMut<NEW_HEAD, TAIL> {
         let _: () = assert!(NEW_HEAD <= HEAD);
         PacketBufferMut { inner: self.inner }
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn reduce_tailroom<const NEW_TAIL: usize>(self) -> PacketBufferMut<HEAD, NEW_TAIL> {
         let _: () = assert!(NEW_TAIL <= TAIL);
         PacketBufferMut { inner: self.inner }
@@ -191,7 +192,7 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
     /// [`PacketBufferDyn::headroom`] must be larger or equal to
     /// `NEW_HEAD`. Otherwise, the old `self` is returned in the `Err(_)`
     /// variant.
-    #[inline(always)]
+    #[inline(never)]
     pub fn restore_headroom<const NEW_HEAD: usize>(
         self,
     ) -> Result<PacketBufferMut<NEW_HEAD, TAIL>, Self> {
@@ -202,7 +203,7 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
         }
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn restore_tailroom<const NEW_TAIL: usize>(
         self,
     ) -> Result<PacketBufferMut<HEAD, NEW_TAIL>, Self> {
@@ -220,7 +221,7 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
     ///
     // TODO: document return value, and that in the `Err(_)` case the buffer has
     // not been modified.
-    #[inline(always)]
+    #[inline(never)]
     pub fn reclaim_headroom<const NEW_HEAD: usize>(
         self,
     ) -> Result<PacketBufferMut<NEW_HEAD, TAIL>, Self> {
@@ -231,7 +232,7 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
         }
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn reclaim_tailroom<const NEW_TAIL: usize>(
         self,
     ) -> Result<PacketBufferMut<HEAD, NEW_TAIL>, Self> {
@@ -242,6 +243,7 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
         }
     }
 
+    #[inline(never)]
     pub fn reset<const NEW_HEAD: usize, const NEW_TAIL: usize>(
         self,
     ) -> Result<PacketBufferMut<NEW_HEAD, NEW_TAIL>, Self> {
@@ -253,12 +255,13 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
         }
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn downcast<T: PacketBufferDyn>(self) -> Option<&'static mut T> {
         let any_buffer: &'static mut dyn Any = self.inner as _;
         any_buffer.downcast_mut::<T>()
     }
 
+    #[inline(never)]
     pub fn prepend<const NEW_HEAD: usize, const N: usize>(
         self,
         header: &[u8; N],
@@ -273,6 +276,7 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
     }
 
     // pub fn append<const NEW_TAIL: usize, const N: usize>(
+    #[inline(never)]
     pub fn append<const NEW_TAIL: usize>(self, tail: &[u8]) -> PacketBufferMut<HEAD, NEW_TAIL> {
         assert!(NEW_TAIL <= TAIL - tail.len());
 
@@ -280,14 +284,17 @@ impl<const HEAD: usize, const TAIL: usize> PacketBufferMut<HEAD, TAIL> {
         self.reduce_tailroom()
     }
 
+    #[inline(never)]
     pub fn copy_from_slice_or_err(&mut self, src: &[u8]) -> Result<(), ErrorCode> {
         self.inner.copy_from_slice_or_err(src)
     }
 
+    #[inline(never)]
     pub fn payload(&self) -> &[u8] {
         self.inner.payload()
     }
 
+    #[inline(never)]
     pub fn payload_mut(&mut self) -> &mut [u8] {
         self.inner.payload_mut()
     }
