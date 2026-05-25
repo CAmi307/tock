@@ -69,7 +69,7 @@ pub struct PacketBufferMut {
 }
 
 impl PacketBufferMut {
-    #[inline(always)]
+    #[inline(never)]
     pub fn new(
         component: &'static str,
         inner: &'static mut dyn PacketBufferDyn,
@@ -95,21 +95,21 @@ impl PacketBufferMut {
     ///
     /// Length of the allocated data in this buffer (excluding head- and
     /// tailroom).
-    #[inline(always)]
+    #[inline(never)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Actual available headroom in the underlying buffer. Must be greater or
     /// equal to the `HEAD` parameter.
-    #[inline(always)]
+    #[inline(never)]
     pub fn headroom(&self) -> usize {
         self.inner.headroom()
     }
 
     /// Actual available tailroom in the underlying buffer. Must be greater or
     /// equal to the `TAIL` parameter.
-    #[inline(always)]
+    #[inline(never)]
     pub fn tailroom(&self) -> usize {
         self.inner.tailroom()
     }
@@ -118,7 +118,7 @@ impl PacketBufferMut {
         self.inner.capacity()
     }
 
-    #[inline(always)]
+    #[inline(never)]
     pub fn downcast<T: PacketBufferDyn>(self) -> Option<&'static mut T> {
         let any_buffer: &'static mut dyn Any = self.inner as _;
         any_buffer.downcast_mut::<T>()
@@ -129,12 +129,12 @@ impl PacketBufferMut {
         let next = self.constraints[self.constraint_index + 1];
         assert!(
             next.0 == self.current_constraints.0 - header.len(),
-            "Tried to prepend {} bytes. Current constraints are: head={}, tail={}. Next constraints are: head={}, tail={}",
-            header.len(),
-            self.current_constraints.0,
-            self.current_constraints.1,
-            next.0,
-            next.1
+            // "Tried to prepend {} bytes. Current constraints are: head={}, tail={}. Next constraints are: head={}, tail={}",
+            // header.len(),
+            // self.current_constraints.0,
+            // self.current_constraints.1,
+            // next.0,
+            // next.1
         );
 
         unsafe {
@@ -142,13 +142,12 @@ impl PacketBufferMut {
         }
 
         // Re-build self with updated heads and tails
-        let next_constraints_index = self.constraint_index + 1;
         Self {
             component: self.component,
             inner: self.inner,
-            current_constraints: self.constraints[next_constraints_index],
+            current_constraints: self.constraints[self.constraint_index + 1],
             constraints: self.constraints,
-            constraint_index: next_constraints_index,
+            constraint_index: self.constraint_index + 1,
         }
     }
 
@@ -157,12 +156,12 @@ impl PacketBufferMut {
         let next = self.constraints[self.constraint_index + 1];
         assert!(
             next.1 == self.current_constraints.1 - tail.len(),
-            "Tried to append {} bytes. Current constraints are: head={}, tail={}. Next constraints are: head={}, tail={}",
-            tail.len(),
-            self.current_constraints.0,
-            self.current_constraints.1,
-            next.0,
-            next.1
+            // "Tried to append {} bytes. Current constraints are: head={}, tail={}. Next constraints are: head={}, tail={}",
+            // tail.len(),
+            // self.current_constraints.0,
+            // self.current_constraints.1,
+            // next.0,
+            // next.1
         );
 
         self.inner.append_from_slice_max(tail);
@@ -179,18 +178,22 @@ impl PacketBufferMut {
         }
     }
 
+    #[inline(never)]
     pub fn copy_from_slice_or_err(&mut self, src: &[u8]) -> Result<(), ErrorCode> {
         self.inner.copy_from_slice_or_err(src)
     }
 
+    #[inline(never)]
     pub fn payload(&self) -> &[u8] {
         self.inner.payload()
     }
 
+    #[inline(never)]
     pub fn payload_mut(&mut self) -> &mut [u8] {
         self.inner.payload_mut()
     }
 
+    #[inline(never)]
     pub fn reclaim_previous_constraints(self) -> Result<PacketBufferMut, Self> {
         if self.constraint_index == 0 {
             return Err(self);
@@ -214,6 +217,7 @@ impl PacketBufferMut {
         }
     }
 
+    #[inline(never)]
     pub fn restore_previous_constraints(self) -> Result<PacketBufferMut, Self> {
         if self.constraint_index == 0 {
             return Err(self);
