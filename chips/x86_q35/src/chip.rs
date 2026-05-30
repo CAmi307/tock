@@ -56,22 +56,22 @@ mod interrupt {
 pub struct Pc<'a, I1: InterruptService + 'a, I2: InterruptService + 'a, const PR: u16 = RELOAD_1KHZ>
 {
     /// Legacy COM1 serial port
-    pub com1: &'a SerialPort<'a>,
+    pub com1: &'a SerialPort<'a, 0, 0>,
 
     /// Legacy COM2 serial port
-    pub com2: &'a SerialPort<'a>,
+    pub com2: &'a SerialPort<'a, 0, 0>,
 
     /// Legacy COM3 serial port
-    pub com3: &'a SerialPort<'a>,
+    pub com3: &'a SerialPort<'a, 0, 0>,
 
     /// Legacy COM4 serial port
-    pub com4: &'a SerialPort<'a>,
+    pub com4: &'a SerialPort<'a, 0, 0>,
 
     /// Legacy PIT timer
     pub pit: &'a Pit<'a, PR>,
 
     /// Vga
-    pub vga: &'a VgaText<'a>,
+    pub vga: &'a VgaText<'a, 0, 0>,
 
     /// System call context
     syscall: Boundary,
@@ -228,12 +228,12 @@ impl<'a, I1: InterruptService, I2: InterruptService, const PR: u16> Chip for Pc<
 
 /// Default x86 PC peripherals
 pub struct PcDefaultPeripherals<const PR: u16 = RELOAD_1KHZ> {
-    pub com1: &'static SerialPort<'static>,
-    pub com2: &'static SerialPort<'static>,
-    pub com3: &'static SerialPort<'static>,
-    pub com4: &'static SerialPort<'static>,
+    pub com1: &'static SerialPort<'static, 0, 0>,
+    pub com2: &'static SerialPort<'static, 0, 0>,
+    pub com3: &'static SerialPort<'static, 0, 0>,
+    pub com4: &'static SerialPort<'static, 0, 0>,
     pub pit: Pit<'static, PR>,
-    pub vga: &'static VgaText<'static>,
+    pub vga: &'static VgaText<'static, 0, 0>,
 }
 
 impl<const PR: u16> PcDefaultPeripherals<PR> {
@@ -245,11 +245,11 @@ impl<const PR: u16> PcDefaultPeripherals<PR> {
     /// - Must be called only once per kernel lifetime.
     pub unsafe fn new(
         s: (
-            (&'static mut core::mem::MaybeUninit<SerialPort<'static>>,),
-            (&'static mut core::mem::MaybeUninit<SerialPort<'static>>,),
-            (&'static mut core::mem::MaybeUninit<SerialPort<'static>>,),
-            (&'static mut core::mem::MaybeUninit<SerialPort<'static>>,),
-            &'static mut core::mem::MaybeUninit<VgaText<'static>>,
+            (&'static mut core::mem::MaybeUninit<SerialPort<'static, 0, 0>>,),
+            (&'static mut core::mem::MaybeUninit<SerialPort<'static, 0, 0>>,),
+            (&'static mut core::mem::MaybeUninit<SerialPort<'static, 0, 0>>,),
+            (&'static mut core::mem::MaybeUninit<SerialPort<'static, 0, 0>>,),
+            &'static mut core::mem::MaybeUninit<VgaText<'static, 0, 0>>,
         ),
         page_dir: &mut PD,
     ) -> Self {

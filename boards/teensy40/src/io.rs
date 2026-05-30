@@ -14,13 +14,13 @@ use crate::imxrt1060::gpio;
 use crate::imxrt1060::lpuart;
 
 struct Writer<'a> {
-    output: &'a mut lpuart::Lpuart<'a>,
+    output: &'a mut lpuart::Lpuart<'a, 0, 0>,
 }
 
 const BAUD_RATE: u32 = 115_200;
 
 impl<'a> Writer<'a> {
-    pub unsafe fn new(output: &'a mut lpuart::Lpuart<'a>) -> Self {
+    pub unsafe fn new(output: &'a mut lpuart::Lpuart<'a, 0, 0>) -> Self {
         let _ = output.configure(uart::Parameters {
             baud_rate: BAUD_RATE,
             stop_bits: uart::StopBits::One,

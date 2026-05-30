@@ -27,7 +27,7 @@ pub mod io;
 
 pub const NUM_PROCS: usize = 4;
 
-pub type VeeRChip = veer_el2::chip::VeeR<'static, VeeRDefaultPeripherals>;
+pub type VeeRChip = veer_el2::chip::VeeR<'static, VeeRDefaultPeripherals<0, 0>>;
 pub type ChipHw = VeeRChip;
 type AlarmHw = Clint<'static>;
 type SchedulerTimerHw =
@@ -49,7 +49,7 @@ type SchedulerInUse = components::sched::cooperative::CooperativeComponentType;
 /// A structure representing this platform that holds references to all
 /// capsules for this platform.
 struct VeeR {
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,
         VirtualMuxAlarm<'static, Clint<'static>>,
@@ -121,7 +121,7 @@ unsafe fn start() -> (&'static kernel::Kernel, VeeR, &'static VeeRChip) {
     PANIC_RESOURCES
         .bind_to_thread_unsafe::<<ChipHw as kernel::platform::chip::Chip>::ThreadIdProvider>();
 
-    let peripherals = static_init!(VeeRDefaultPeripherals, VeeRDefaultPeripherals::new());
+    let peripherals = static_init!(VeeRDefaultPeripherals<0,0>, VeeRDefaultPeripherals::new());
     peripherals.init();
 
     // initialize capabilities

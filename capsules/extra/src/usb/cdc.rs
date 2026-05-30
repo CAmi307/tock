@@ -26,6 +26,7 @@ use kernel::hil::usb::TransferType;
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::cells::TakeCell;
 use kernel::utilities::cells::VolatileCell;
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use kernel::ErrorCode;
 
 /// Identifying number for the endpoint when transferring data from us to the
@@ -112,7 +113,7 @@ impl From<u8> for CDCCntrlMessage {
 
 /// Implementation of the Abstract Control Model (ACM) for the Communications
 /// Class Device (CDC) over USB.
-pub struct CdcAcm<'a, U: 'a, A: 'a + Alarm<'a>> {
+pub struct CdcAcm<'a, U: 'a, A: 'a + Alarm<'a>, const HEAD: usize = 0, const TAIL: usize = 0> {
     /// Helper USB client library for handling many USB operations.
     client_ctrl: ClientCtrl<'a, 'static, U>,
 
@@ -128,14 +129,14 @@ pub struct CdcAcm<'a, U: 'a, A: 'a + Alarm<'a>> {
     ctrl_state: Cell<CtrlState>,
 
     /// A holder reference for the TX buffer we are transmitting from.
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: OptionalCell<PacketBufferMut<HEAD, TAIL>>,
     /// The number of bytes the client has asked us to send. We track this so we
     /// can pass it back to the client when the transmission has finished.
     tx_len: Cell<usize>,
     /// Where in the `tx_buffer` we need to start sending from when we continue.
     tx_offset: Cell<usize>,
     /// The TX client to use when transmissions finish.
-    tx_client: OptionalCell<&'a dyn uart::TransmitClient>,
+    tx_client: OptionalCell<&'a dyn uart::TransmitClient<HEAD, TAIL>>,
 
     /// A holder for the buffer to receive bytes into. We use this as a flag as
     /// well, if we have a buffer then we are actively doing a receive.
@@ -181,7 +182,14 @@ pub struct CdcAcm<'a, U: 'a, A: 'a + Alarm<'a>> {
     host_initiated_function: Option<&'a (dyn Fn() + 'a)>,
 }
 
-impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> CdcAcm<'a, U, A> {
+impl<
+        'a,
+        U: hil::usb::UsbController<'a>,
+        A: 'a + Alarm<'a>,
+        const HEAD: usize,
+        const TAIL: usize,
+    > CdcAcm<'a, U, A, HEAD, TAIL>
+{
     pub fn new(
         controller: &'a U,
         max_ctrl_packet_size: u8,
@@ -296,7 +304,7 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> CdcAcm<'a, U, A> {
             ],
             state: Cell::new(State::Disabled),
             ctrl_state: Cell::new(CtrlState::Idle),
-            tx_buffer: TakeCell::empty(),
+            tx_buffer: OptionalCell::empty(),
             tx_len: Cell::new(0),
             tx_offset: Cell::new(0),
             tx_client: OptionalCell::empty(),
@@ -365,8 +373,13 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> CdcAcm<'a, U, A> {
     }
 }
 
-impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> hil::usb::Client<'a>
-    for CdcAcm<'a, U, A>
+impl<
+        'a,
+        U: hil::usb::UsbController<'a>,
+        A: 'a + Alarm<'a>,
+        const HEAD: usize,
+        const TAIL: usize,
+    > hil::usb::Client<'a> for CdcAcm<'a, U, A, HEAD, TAIL>
 {
     fn enable(&'a self) {
         // Set up the default control endpoint
@@ -533,7 +546,7 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> hil::usb::Client<'a>
 
                             // Copy from the TX buffer to the outgoing USB packet.
                             for i in 0..to_send {
-                                packet[i].set(tx_buf[offset + i]);
+                                packet[i].set(tx_buf.payload()[offset + i]);
                             }
 
                             // Update our state on how much more there is to send.
@@ -653,18 +666,23 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> uart::Configure for 
     }
 }
 
-impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> uart::Transmit<'a>
-    for CdcAcm<'a, U, A>
+impl<
+        'a,
+        U: hil::usb::UsbController<'a>,
+        A: 'a + Alarm<'a>,
+        const HEAD: usize,
+        const TAIL: usize,
+    > uart::Transmit<'a, HEAD, TAIL> for CdcAcm<'a, U, A, HEAD, TAIL>
 {
-    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
+    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.tx_buffer.is_some() {
             // We are already handling a transmission, we cannot queue another
             // request.

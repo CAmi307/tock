@@ -24,7 +24,7 @@ impl IoWrite for Writer {
     fn write(&mut self, buf: &[u8]) -> usize {
         // This creates a second instance of the UART peripheral, and should only be used
         // during panic.
-        earlgrey::uart::Uart::new(
+        earlgrey::uart::Uart::<0, 0>::new(
             earlgrey::uart::UART0_BASE,
             crate::ChipConfig::PERIPHERAL_FREQ,
         )

@@ -5,7 +5,7 @@
 #![forbid(unsafe_code)]
 #![no_std]
 
-pub mod test;
+// pub mod test;
 pub mod tutorials;
 
 #[macro_use]
@@ -77,7 +77,7 @@ pub mod mx25r6435f;
 pub mod ninedof;
 pub mod nonvolatile_storage_driver;
 pub mod nonvolatile_to_pages;
-pub mod nrf51822_serialization;
+// pub mod nrf51822_serialization;
 pub mod panic_button;
 pub mod pca9544a;
 pub mod pressure;
@@ -116,6 +116,6 @@ pub mod tickv_kv_store;
 pub mod touch;
 pub mod tsl2561;
 pub mod usb;
-pub mod usb_hid_driver;
+// pub mod usb_hid_driver;
 pub mod virtualizers;
 pub mod wifi;

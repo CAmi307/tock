@@ -144,11 +144,19 @@ pub struct QemuI386Q35Platform {
         { capsules_core::process_console::DEFAULT_COMMAND_HISTORY_LEN },
         VirtualMuxAlarm<'static, Pit<'static, RELOAD_1KHZ>>,
         components::process_console::Capability,
+        2,
+        1,
+        1,
+        1,
     >,
-    console: &'static Console<'static>,
+    console: &'static Console<'static, 2, 1, 1, 1>,
     lldb: &'static capsules_core::low_level_debug::LowLevelDebug<
         'static,
-        capsules_core::virtualizers::virtual_uart::UartDevice<'static>,
+        capsules_core::virtualizers::virtual_uart::UartDevice<'static, 1, 1, 0, 0>,
+        2,
+        1,
+        1,
+        1,
     >,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,
@@ -238,11 +246,19 @@ unsafe extern "cdecl" fn main() {
             PcDefaultPeripherals,
             PcDefaultPeripherals::new(
                 (
-                    (kernel::static_buf!(x86_q35::serial::SerialPort<'static>),),
-                    (kernel::static_buf!(x86_q35::serial::SerialPort<'static>),),
-                    (kernel::static_buf!(x86_q35::serial::SerialPort<'static>),),
-                    (kernel::static_buf!(x86_q35::serial::SerialPort<'static>),),
-                    kernel::static_buf!(x86_q35::vga_uart_driver::VgaText<'static>),
+                    (kernel::static_buf!(
+                        x86_q35::serial::SerialPort<'static, 0, 0>
+                    ),),
+                    (kernel::static_buf!(
+                        x86_q35::serial::SerialPort<'static, 0, 0>
+                    ),),
+                    (kernel::static_buf!(
+                        x86_q35::serial::SerialPort<'static, 0, 0>
+                    ),),
+                    (kernel::static_buf!(
+                        x86_q35::serial::SerialPort<'static, 0, 0>
+                    ),),
+                    kernel::static_buf!(x86_q35::vga_uart_driver::VgaText<'static, 0, 0>),
                 ),
                 &mut *ptr::addr_of_mut!(PAGE_DIR),
             )

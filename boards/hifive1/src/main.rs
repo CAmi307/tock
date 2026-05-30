@@ -55,10 +55,14 @@ struct HiFive1 {
         LedLow<'static, sifive::gpio::GpioPin<'static>>,
         3,
     >,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     lldb: &'static capsules_core::low_level_debug::LowLevelDebug<
         'static,
-        capsules_core::virtualizers::virtual_uart::UartDevice<'static>,
+        capsules_core::virtualizers::virtual_uart::UartDevice<'static, 1, 1, 0, 0>,
+        2,
+        1,
+        1,
+        1,
     >,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,

@@ -51,7 +51,7 @@ struct Teensy40 {
         LedHigh<'static, imxrt1060::gpio::Pin<'static>>,
         1,
     >,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     ipc: kernel::ipc::IPC<{ NUM_PROCS as u8 }>,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,

@@ -25,7 +25,7 @@ impl Write for Writer {
 
 impl IoWrite for Writer {
     fn write(&mut self, buf: &[u8]) -> usize {
-        let uart = apollo3::uart::Uart::new_uart_0(); // Aliases memory for uart0. Okay bc we are panicking.
+        let uart = apollo3::uart::Uart::<0, 0>::new_uart_0(); // Aliases memory for uart0. Okay bc we are panicking.
         uart.transmit_sync(buf);
         buf.len()
     }

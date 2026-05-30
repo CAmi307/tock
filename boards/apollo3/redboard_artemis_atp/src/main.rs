@@ -80,7 +80,7 @@ struct RedboardArtemisAtp {
         1,
     >,
     gpio: &'static capsules_core::gpio::GPIO<'static, apollo3::gpio::GpioPin<'static>>,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     i2c_master_slave: &'static capsules_core::i2c_master_slave_driver::I2CMasterSlaveDriver<
         'static,
         capsules_core::i2c_master_slave_combo::I2CMasterSlaveCombo<

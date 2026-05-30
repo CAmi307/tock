@@ -7,17 +7,18 @@ use core::ptr::write_volatile;
 use kernel::deferred_call::{DeferredCall, DeferredCallClient};
 use kernel::hil;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
+use kernel::utilities::packet_buffer::{PacketBufferMut, PacketSliceMut};
 use kernel::ErrorCode;
 
-pub struct SemihostUart<'a> {
+pub struct SemihostUart<'a, const HEAD: usize, const TAIL: usize> {
     deferred_call: DeferredCall,
-    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient>,
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient<HEAD, TAIL>>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_len: Cell<usize>,
 }
 
-impl<'a> SemihostUart<'a> {
-    pub fn new() -> SemihostUart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> SemihostUart<'a, HEAD, TAIL> {
+    pub fn new() -> SemihostUart<'a, HEAD, TAIL> {
         SemihostUart {
             deferred_call: DeferredCall::new(),
             tx_client: OptionalCell::empty(),
@@ -27,41 +28,43 @@ impl<'a> SemihostUart<'a> {
     }
 }
 
-impl Default for SemihostUart<'_> {
+impl<const HEAD: usize, const TAIL: usize> Default for SemihostUart<'_, HEAD, TAIL> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl hil::uart::Configure for SemihostUart<'_> {
+impl<const HEAD: usize, const TAIL: usize> hil::uart::Configure for SemihostUart<'_, HEAD, TAIL> {
     fn configure(&self, _params: hil::uart::Parameters) -> Result<(), ErrorCode> {
         Ok(())
     }
 }
 
-impl<'a> hil::uart::Transmit<'a> for SemihostUart<'a> {
-    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> hil::uart::Transmit<'a, HEAD, TAIL>
+    for SemihostUart<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if tx_len == 0 || tx_len > tx_buffer.len() {
             Err((ErrorCode::SIZE, tx_buffer))
         } else if self.tx_buffer.is_some() {
             Err((ErrorCode::BUSY, tx_buffer))
         } else {
-            for b in &tx_buffer[..tx_len] {
+            for b in &tx_buffer.payload()[..tx_len] {
                 unsafe {
                     // Print to this address for simulation output
                     write_volatile(0xd0580000 as *mut u32, (*b) as u32);
                 }
             }
             self.tx_len.set(tx_len);
-            self.tx_buffer.replace(tx_buffer);
+            self.tx_buffer.replace(tx_buffer.downcast().unwrap());
             // The whole buffer was transmited immediately
             self.deferred_call.set();
             Ok(())
@@ -77,7 +80,9 @@ impl<'a> hil::uart::Transmit<'a> for SemihostUart<'a> {
     }
 }
 
-impl<'a> hil::uart::Receive<'a> for SemihostUart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> hil::uart::Receive<'a>
+    for SemihostUart<'a, HEAD, TAIL>
+{
     fn set_receive_client(&self, _client: &'a dyn hil::uart::ReceiveClient) {}
     fn receive_buffer(
         &self,
@@ -94,7 +99,7 @@ impl<'a> hil::uart::Receive<'a> for SemihostUart<'a> {
     }
 }
 
-impl DeferredCallClient for SemihostUart<'_> {
+impl<const HEAD: usize, const TAIL: usize> DeferredCallClient for SemihostUart<'_, HEAD, TAIL> {
     fn register(&'static self) {
         self.deferred_call.register(self);
     }
@@ -102,7 +107,11 @@ impl DeferredCallClient for SemihostUart<'_> {
     fn handle_deferred_call(&self) {
         self.tx_client.map(|client| {
             self.tx_buffer.take().map(|tx_buf| {
-                client.transmitted_buffer(tx_buf, self.tx_len.get(), Ok(()));
+                client.transmitted_buffer(
+                    PacketBufferMut::new(tx_buf).unwrap(),
+                    self.tx_len.get(),
+                    Ok(()),
+                );
             });
         });
     }

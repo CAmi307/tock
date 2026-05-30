@@ -83,7 +83,7 @@ struct Imxrt1050EVKB {
         VirtualMuxAlarm<'static, imxrt1050::gpt::Gpt1<'static>>,
     >,
     button: &'static capsules_core::button::Button<'static, imxrt1050::gpio::Pin<'static>>,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     gpio: &'static capsules_core::gpio::GPIO<'static, imxrt1050::gpio::Pin<'static>>,
     ipc: kernel::ipc::IPC<{ NUM_PROCS as u8 }>,
     led: &'static capsules_core::led::LedDriver<

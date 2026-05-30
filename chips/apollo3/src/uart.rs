@@ -11,6 +11,7 @@ use kernel::hil;
 use kernel::hil::uart;
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::cells::TakeCell;
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
 use kernel::utilities::registers::{register_bitfields, register_structs, ReadWrite};
 use kernel::utilities::StaticRef;
@@ -164,13 +165,13 @@ register_bitfields![u32,
     ]
 ];
 
-pub struct Uart<'a> {
+pub struct Uart<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
     registers: StaticRef<UartRegisters>,
     clock_frequency: u32,
-    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient>,
+    tx_client: OptionalCell<&'a dyn hil::uart::TransmitClient<HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn hil::uart::ReceiveClient>,
 
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_len: Cell<usize>,
     tx_index: Cell<usize>,
 
@@ -184,7 +185,7 @@ pub struct UartParams {
     pub baud_rate: u32,
 }
 
-impl Uart<'_> {
+impl<const HEAD: usize, const TAIL: usize> Uart<'_, HEAD, TAIL> {
     // unsafe bc of UART0_BASE usage, called twice would alias location
     pub fn new_uart_0() -> Self {
         Self {
@@ -276,6 +277,8 @@ impl Uart<'_> {
             // Read from the transmit buffer and send bytes to the UART hardware
             // until either the buffer is empty or the UART hardware is full.
             self.tx_buffer.map(|tx_buf| {
+                let headroom = tx_buf.headroom();
+
                 let tx_len = len - idx;
 
                 for i in 0..tx_len {
@@ -283,7 +286,8 @@ impl Uart<'_> {
                         break;
                     }
                     let tx_idx = idx + i;
-                    regs.dr.write(DR::DATA.val(tx_buf[tx_idx] as u32));
+                    regs.dr
+                        .write(DR::DATA.val(tx_buf.data_slice_mut()[headroom + tx_idx] as u32));
                     self.tx_index.set(tx_idx + 1)
                 }
             });
@@ -342,7 +346,11 @@ impl Uart<'_> {
 
                 self.tx_client.map(|client| {
                     self.tx_buffer.take().map(|tx_buf| {
-                        client.transmitted_buffer(tx_buf, self.tx_len.get(), Ok(()));
+                        client.transmitted_buffer(
+                            PacketBufferMut::new(tx_buf).unwrap(),
+                            self.tx_len.get(),
+                            Ok(()),
+                        );
                     });
                 });
             } else {
@@ -415,23 +423,25 @@ impl hil::uart::Configure for Uart<'_> {
     }
 }
 
-impl<'a> hil::uart::Transmit<'a> for Uart<'a> {
-    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> hil::uart::Transmit<'a, HEAD, TAIL>
+    for Uart<'a, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_data: &'static mut [u8],
+        tx_data: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if tx_len == 0 || tx_len > tx_data.len() {
             Err((ErrorCode::SIZE, tx_data))
         } else if self.tx_buffer.is_some() {
             Err((ErrorCode::BUSY, tx_data))
         } else {
             // Save the buffer so we can keep sending it.
-            self.tx_buffer.replace(tx_data);
+            self.tx_buffer.replace(tx_data.downcast().unwrap());
             self.tx_len.set(tx_len);
             self.tx_index.set(0);
 

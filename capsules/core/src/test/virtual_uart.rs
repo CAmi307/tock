@@ -12,13 +12,23 @@ use kernel::hil::uart::Receive;
 use kernel::utilities::cells::TakeCell;
 use kernel::ErrorCode;
 
-pub struct TestVirtualUartReceive {
-    device: &'static UartDevice<'static>,
+pub struct TestVirtualUartReceive<
+    const HEAD: usize,
+    const TAIL: usize,
+    const LOWER_HEAD: usize,
+    const LOWER_TAIL: usize,
+> {
+    device: &'static UartDevice<'static, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>,
     buffer: TakeCell<'static, [u8]>,
 }
 
-impl TestVirtualUartReceive {
-    pub fn new(device: &'static UartDevice<'static>, buffer: &'static mut [u8]) -> Self {
+impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
+    TestVirtualUartReceive<HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+{
+    pub fn new(
+        device: &'static UartDevice<'static, HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>,
+        buffer: &'static mut [u8],
+    ) -> Self {
         TestVirtualUartReceive {
             device,
             buffer: TakeCell::new(buffer),
@@ -35,7 +45,9 @@ impl TestVirtualUartReceive {
     }
 }
 
-impl uart::ReceiveClient for TestVirtualUartReceive {
+impl<const HEAD: usize, const TAIL: usize, const LOWER_HEAD: usize, const LOWER_TAIL: usize>
+    uart::ReceiveClient for TestVirtualUartReceive<HEAD, TAIL, LOWER_HEAD, LOWER_TAIL>
+{
     fn received_buffer(
         &self,
         rx_buffer: &'static mut [u8],

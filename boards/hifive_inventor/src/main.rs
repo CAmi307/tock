@@ -46,10 +46,14 @@ type SchedulerInUse = components::sched::cooperative::CooperativeComponentType;
 /// A structure representing this platform that holds references to all
 /// capsules for this platform. We've included an alarm and console.
 struct HiFiveInventor {
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static, 2, 1, 1, 1>,
     lldb: &'static capsules_core::low_level_debug::LowLevelDebug<
         'static,
-        capsules_core::virtualizers::virtual_uart::UartDevice<'static>,
+        capsules_core::virtualizers::virtual_uart::UartDevice<'static, 1, 1, 0, 0>,
+        2,
+        1,
+        1,
+        1,
     >,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,

@@ -10,6 +10,7 @@ use kernel::hil::uart::{
     Configure, Parameters, Parity, Receive, StopBits, Transmit, TransmitClient, Width,
 };
 use kernel::utilities::cells::{OptionalCell, TakeCell};
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
 use kernel::utilities::registers::{register_bitfields, register_structs, ReadWrite};
 use kernel::utilities::StaticRef;
@@ -346,14 +347,14 @@ const UART0_BASE: StaticRef<UartRegisters> =
 const UART1_BASE: StaticRef<UartRegisters> =
     unsafe { StaticRef::new(0x40078000 as *const UartRegisters) };
 
-pub struct Uart<'a> {
+pub struct Uart<'a, const HEAD: usize = 0, const TAIL: usize = 0> {
     registers: StaticRef<UartRegisters>,
     clocks: OptionalCell<&'a clocks::Clocks>,
 
-    tx_client: OptionalCell<&'a dyn TransmitClient>,
+    tx_client: OptionalCell<&'a dyn TransmitClient<HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn ReceiveClient>,
 
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_position: Cell<usize>,
     tx_len: Cell<usize>,
     tx_status: Cell<UARTStateTX>,
@@ -366,7 +367,7 @@ pub struct Uart<'a> {
     deferred_call: DeferredCall,
 }
 
-impl<'a> Uart<'a> {
+impl<'a, const HEAD: usize, const TAIL: usize> Uart<'a, HEAD, TAIL> {
     pub fn new_uart0() -> Self {
         Self {
             registers: UART0_BASE,
@@ -464,7 +465,11 @@ impl<'a> Uart<'a> {
                         self.tx_status.set(UARTStateTX::Idle);
                         self.tx_client.map(|client| {
                             self.tx_buffer.take().map(|buf| {
-                                client.transmitted_buffer(buf, self.tx_position.get(), Ok(()));
+                                client.transmitted_buffer(
+                                    PacketBufferMut::new(buf).unwrap(),
+                                    self.tx_position.get(),
+                                    Ok(()),
+                                );
                             });
                         });
                     }
@@ -511,9 +516,11 @@ impl<'a> Uart<'a> {
     fn fill_fifo(&self) {
         while self.uart_is_writable() && self.tx_position.get() < self.tx_len.get() {
             self.tx_buffer.map(|buf| {
+                let headroom = buf.headroom();
+
                 self.registers
                     .uartdr
-                    .set(buf[self.tx_position.get()].into());
+                    .set(buf.data_slice_mut()[headroom + self.tx_position.get()].into());
                 self.tx_position.replace(self.tx_position.get() + 1);
             });
         }
@@ -620,7 +627,11 @@ impl DeferredCallClient for Uart<'_> {
             // alert client
             self.tx_client.map(|client| {
                 self.tx_buffer.take().map(|buf| {
-                    client.transmitted_buffer(buf, self.tx_position.get(), Err(ErrorCode::CANCEL));
+                    client.transmitted_buffer(
+                        PacketBufferMut::new(buf).unwrap(),
+                        self.tx_position.get(),
+                        Err(ErrorCode::CANCEL),
+                    );
                 });
             });
             self.tx_status.set(UARTStateTX::Idle);
@@ -729,19 +740,19 @@ impl Configure for Uart<'_> {
     }
 }
 
-impl<'a> Transmit<'a> for Uart<'a> {
-    fn set_transmit_client(&self, client: &'a dyn TransmitClient) {
+impl<'a, const HEAD: usize, const TAIL: usize> Transmit<'a, HEAD, TAIL> for Uart<'a, HEAD, TAIL> {
+    fn set_transmit_client(&self, client: &'a dyn TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         if self.tx_status.get() == UARTStateTX::Idle {
             if tx_len <= tx_buffer.len() {
-                self.tx_buffer.put(Some(tx_buffer));
+                self.tx_buffer.replace(tx_buffer.downcast().unwrap());
                 self.tx_position.set(0);
                 self.tx_len.set(tx_len);
                 self.tx_status.set(UARTStateTX::Transmitting);

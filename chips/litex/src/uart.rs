@@ -11,6 +11,7 @@ use core::cell::Cell;
 use kernel::deferred_call::{DeferredCall, DeferredCallClient};
 use kernel::hil::uart;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
+use kernel::utilities::packet_buffer::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
 use kernel::utilities::StaticRef;
 use kernel::ErrorCode;
 
@@ -86,12 +87,12 @@ register_bitfields![u8,
     ]
 ];
 
-pub struct LiteXUart<'a, R: LiteXSoCRegisterConfiguration> {
+pub struct LiteXUart<'a, R: LiteXSoCRegisterConfiguration, const HEAD: usize, const TAIL: usize> {
     uart_regs: StaticRef<LiteXUartRegisters<R>>,
     phy: Option<(StaticRef<LiteXUartPhyRegisters<R>>, u32)>,
-    tx_client: OptionalCell<&'a dyn uart::TransmitClient>,
+    tx_client: OptionalCell<&'a dyn uart::TransmitClient<HEAD, TAIL>>,
     rx_client: OptionalCell<&'a dyn uart::ReceiveClient>,
-    tx_buffer: TakeCell<'static, [u8]>,
+    tx_buffer: TakeCell<'static, PacketSliceMut>,
     tx_len: Cell<usize>,
     tx_progress: Cell<usize>,
     tx_aborted: Cell<bool>,
@@ -105,11 +106,13 @@ pub struct LiteXUart<'a, R: LiteXSoCRegisterConfiguration> {
     initialized: Cell<bool>,
 }
 
-impl<'a, R: LiteXSoCRegisterConfiguration> LiteXUart<'a, R> {
+impl<'a, R: LiteXSoCRegisterConfiguration, const HEAD: usize, const TAIL: usize>
+    LiteXUart<'a, R, HEAD, TAIL>
+{
     pub fn new(
         uart_base: StaticRef<LiteXUartRegisters<R>>,
         phy_args: Option<(StaticRef<LiteXUartPhyRegisters<R>>, u32)>,
-    ) -> LiteXUart<'a, R> {
+    ) -> LiteXUart<'a, R, HEAD, TAIL> {
         LiteXUart {
             uart_regs: uart_base,
             phy: phy_args,
@@ -231,8 +234,13 @@ impl<'a, R: LiteXSoCRegisterConfiguration> LiteXUart<'a, R> {
         let buffer = self.tx_buffer.take().unwrap(); // Unwrap fail = no tx buffer
         let progress = self.tx_progress.get();
 
-        self.tx_client
-            .map(move |client| client.transmitted_buffer(buffer, progress, Err(ErrorCode::CANCEL)));
+        self.tx_client.map(move |client| {
+            client.transmitted_buffer(
+                PacketBufferMut::new(buffer).unwrap(),
+                progress,
+                Err(ErrorCode::CANCEL),
+            )
+        });
     }
 
     // This is either called as a deferred call or by a
@@ -261,7 +269,8 @@ impl<'a, R: LiteXSoCRegisterConfiguration> LiteXUart<'a, R> {
             fifo_full = ReadRegWrapper::wrap(&self.uart_regs.txfull).is_set(txfull::full);
             !fifo_full && progress < len
         } {
-            WriteRegWrapper::wrap(&self.uart_regs.rxtx).write(rxtx::data.val(buffer[progress]));
+            WriteRegWrapper::wrap(&self.uart_regs.rxtx)
+                .write(rxtx::data.val(buffer.payload()[progress]));
             progress += 1;
         }
 
@@ -288,13 +297,16 @@ impl<'a, R: LiteXSoCRegisterConfiguration> LiteXUart<'a, R> {
             //
             // Disable TX events until the next transmission and call back to the client
             self.uart_regs.ev().disable_event(EVENT_MANAGER_INDEX_TX);
-            self.tx_client
-                .map(move |client| client.transmitted_buffer(buffer, len, Ok(())));
+            self.tx_client.map(move |client| {
+                client.transmitted_buffer(PacketBufferMut::new(buffer).unwrap(), len, Ok(()))
+            });
         }
     }
 }
 
-impl<R: LiteXSoCRegisterConfiguration> uart::Configure for LiteXUart<'_, R> {
+impl<R: LiteXSoCRegisterConfiguration, const HEAD: usize, const TAIL: usize> uart::Configure
+    for LiteXUart<'_, R, HEAD, TAIL>
+{
     fn configure(&self, params: uart::Parameters) -> Result<(), ErrorCode> {
         // LiteX UART supports only
         // - a fixed with of 8 bits
@@ -326,16 +338,18 @@ impl<R: LiteXSoCRegisterConfiguration> uart::Configure for LiteXUart<'_, R> {
     }
 }
 
-impl<'a, R: LiteXSoCRegisterConfiguration> uart::Transmit<'a> for LiteXUart<'a, R> {
-    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
+impl<'a, R: LiteXSoCRegisterConfiguration, const HEAD: usize, const TAIL: usize>
+    uart::Transmit<'a, HEAD, TAIL> for LiteXUart<'a, R, HEAD, TAIL>
+{
+    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient<HEAD, TAIL>) {
         self.tx_client.set(client);
     }
 
     fn transmit_buffer(
         &self,
-        tx_buffer: &'static mut [u8],
+        tx_buffer: PacketBufferMut<HEAD, TAIL>,
         tx_len: usize,
-    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
+    ) -> Result<(), (ErrorCode, PacketBufferMut<HEAD, TAIL>)> {
         // Make sure the UART is initialized
         assert!(self.initialized.get());
 
@@ -374,14 +388,15 @@ impl<'a, R: LiteXSoCRegisterConfiguration> uart::Transmit<'a> for LiteXUart<'a, 
             fifo_full = ReadRegWrapper::wrap(&self.uart_regs.txfull).is_set(txfull::full);
             (progress < tx_len) && !fifo_full
         } {
-            WriteRegWrapper::wrap(&self.uart_regs.rxtx).write(rxtx::data.val(tx_buffer[progress]));
+            WriteRegWrapper::wrap(&self.uart_regs.rxtx)
+                .write(rxtx::data.val(tx_buffer.payload()[progress]));
             progress += 1;
         }
 
         // Store the respective values (implicitly setting the device as busy)
         self.tx_progress.set(progress);
         self.tx_len.set(tx_len);
-        self.tx_buffer.replace(tx_buffer);
+        self.tx_buffer.replace(tx_buffer.downcast().unwrap());
         self.tx_aborted.set(false);
 
         // If we did not reach the fifo-limit, the entire buffer
@@ -437,7 +452,9 @@ impl<'a, R: LiteXSoCRegisterConfiguration> uart::Transmit<'a> for LiteXUart<'a, 
     }
 }
 
-impl<'a, R: LiteXSoCRegisterConfiguration> uart::Receive<'a> for LiteXUart<'a, R> {
+impl<'a, R: LiteXSoCRegisterConfiguration, const HEAD: usize, const TAIL: usize> uart::Receive<'a>
+    for LiteXUart<'a, R, HEAD, TAIL>
+{
     fn set_receive_client(&self, client: &'a dyn uart::ReceiveClient) {
         self.rx_client.set(client);
     }
@@ -520,7 +537,9 @@ impl<'a, R: LiteXSoCRegisterConfiguration> uart::Receive<'a> for LiteXUart<'a, R
     }
 }
 
-impl<R: LiteXSoCRegisterConfiguration> DeferredCallClient for LiteXUart<'_, R> {
+impl<R: LiteXSoCRegisterConfiguration, const HEAD: usize, const TAIL: usize> DeferredCallClient
+    for LiteXUart<'_, R, HEAD, TAIL>
+{
     fn register(&'static self) {
         self.deferred_call.register(self)
     }

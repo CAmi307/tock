@@ -100,11 +100,6 @@
 //! TOCK_DEBUG(0): /tock/capsules/src/sensys.rs:24: got here
 //! ```
 
-use core::cell::Cell;
-use core::fmt::{write, Arguments, Write};
-use core::panic::PanicInfo;
-use core::str;
-
 use crate::capabilities::SetDebugWriterCapability;
 use crate::collections::ring_buffer::RingBuffer;
 use crate::hil;
@@ -114,9 +109,12 @@ use crate::process::ProcessPrinter;
 use crate::process::ProcessSlot;
 use crate::processbuffer::ReadableProcessSlice;
 use crate::utilities::binary_write::BinaryToWriteWrapper;
-use crate::utilities::cells::MapCell;
-use crate::utilities::cells::NumericCellExt;
+use crate::utilities::cells::{MapCell, NumericCellExt};
 use crate::utilities::single_thread_value::SingleThreadValue;
+use core::cell::Cell;
+use core::fmt::{write, Arguments, Write};
+use core::panic::PanicInfo;
+use core::str;
 
 /// Implementation of `std::io::Write` for `no_std`.
 ///

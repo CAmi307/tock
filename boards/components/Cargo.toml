@@ -13,6 +13,7 @@ kernel = { path = "../../kernel" }
 
 capsules-core = { path = "../../capsules/core" }
 capsules-extra = { path = "../../capsules/extra" }
+cortex-m-semihosting = "0.5.0"
 capsules-system = { path = "../../capsules/system" }
 segger = { path = "../../chips/segger" }
 

@@ -80,7 +80,7 @@ pub struct Platform {
     i2c: &'static capsules_core::i2c_master::I2CMasterDriver<'static, I2c<'static, 'static>>,
     date_time:
         &'static capsules_extra::date_time::DateTimeCapsule<'static, rp2040::rtc::Rtc<'static>>,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static,2,1,1,1>,
 }
 
 impl SyscallDriverLookup for Platform {

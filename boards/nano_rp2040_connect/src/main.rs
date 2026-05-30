@@ -77,7 +77,7 @@ type SchedulerInUse = components::sched::round_robin::RoundRobinComponentType;
 /// Supported drivers by the platform
 pub struct NanoRP2040Connect {
     ipc: kernel::ipc::IPC<{ NUM_PROCS as u8 }>,
-    console: &'static capsules_core::console::Console<'static>,
+    console: &'static capsules_core::console::Console<'static,2,1,1,1>,
     alarm: &'static capsules_core::alarm::AlarmDriver<
         'static,
         VirtualMuxAlarm<'static, rp2040::timer::RPTimer<'static>>,
