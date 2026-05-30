@@ -527,3 +527,234 @@ unsafe impl PacketBufferDyn for PacketSliceMut {
     // 	slice[headroom..(length - tailroom)].iter_mut()
     // }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use super::{PacketBufferDyn, PacketBufferMut, PacketSliceMut};
+    use crate::ErrorCode;
+    use std::boxed::Box;
+
+    const METADATA_BYTES: usize = 3 * core::mem::size_of::<usize>();
+
+    fn make_packet_slice<const N: usize>(headroom: usize) -> &'static mut PacketSliceMut {
+        PacketSliceMut::new(Box::leak(Box::new([0; N])), headroom).unwrap()
+    }
+
+    fn make_packet_buffer<const N: usize>(
+        headroom: usize,
+        constraints: &'static [(usize, usize)],
+    ) -> PacketBufferMut {
+        let packet_slice = make_packet_slice::<N>(headroom);
+        let inner: &'static mut dyn PacketBufferDyn = packet_slice;
+        PacketBufferMut::new("test", inner, constraints).unwrap()
+    }
+
+    #[test]
+    fn packet_construction_prepend_append_produces_expected_frame() {
+        let mut buffer = make_packet_buffer::<33>(3, &[(3, 3), (1, 3), (1, 1)]);
+
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        let buffer = buffer.prepend(b"<{");
+        let buffer = buffer.append(b">}");
+
+        assert_eq!(buffer.payload(), b"<{abc>}");
+        assert_eq!(buffer.headroom(), 1);
+        assert_eq!(buffer.tailroom(), 1);
+        assert_eq!(buffer.current_constraints, (1, 1));
+        assert_eq!(buffer.constraint_index, 2);
+    }
+
+    #[test]
+    fn headroom_tailroom_evolve_across_operations() {
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 5), (2, 5), (2, 3)]);
+
+        let capacity = buffer.capacity();
+        assert_eq!(buffer.headroom(), 4);
+        assert_eq!(buffer.tailroom(), capacity - 4);
+        assert_eq!(buffer.payload(), b"");
+        assert_eq!(buffer.current_constraints, (4, 5));
+
+        buffer.copy_from_slice_or_err(b"hi").unwrap();
+        assert_eq!(buffer.headroom(), 4);
+        assert_eq!(buffer.tailroom(), capacity - 6);
+        assert_eq!(buffer.payload(), b"hi");
+
+        let buffer = buffer.prepend(b"<<");
+        assert_eq!(buffer.headroom(), 2);
+        assert_eq!(buffer.tailroom(), capacity - 6);
+        assert_eq!(buffer.payload(), b"<<hi");
+        assert_eq!(buffer.current_constraints, (2, 5));
+        assert_eq!(buffer.constraint_index, 1);
+
+        let buffer = buffer.append(b">>");
+        assert_eq!(buffer.headroom(), 2);
+        assert_eq!(buffer.tailroom(), capacity - 8);
+        assert_eq!(buffer.payload(), b"<<hi>>");
+        assert_eq!(buffer.current_constraints, (2, 3));
+        assert_eq!(buffer.constraint_index, 2);
+    }
+
+    #[test]
+    fn new_rejects_constraint_mismatch() {
+        let packet_slice = make_packet_slice::<32>(3);
+        let inner: &'static mut dyn PacketBufferDyn = packet_slice;
+        assert!(PacketBufferMut::new("test", inner, &[(3, 4)]).is_some());
+
+        let packet_slice = make_packet_slice::<32>(3);
+        let inner: &'static mut dyn PacketBufferDyn = packet_slice;
+        assert!(PacketBufferMut::new("test", inner, &[(4, 4)]).is_none());
+
+        let packet_slice = make_packet_slice::<32>(3);
+        let inner: &'static mut dyn PacketBufferDyn = packet_slice;
+        assert!(PacketBufferMut::new("test", inner, &[(3, 10)]).is_none());
+    }
+
+    #[test]
+    fn copy_from_slice_returns_size_when_payload_does_not_fit() {
+        let mut buffer = make_packet_buffer::<32>(3, &[(3, 2)]);
+        let initial_tailroom = buffer.tailroom();
+
+        let result = buffer.copy_from_slice_or_err(&[0xAA; 32]);
+
+        assert_eq!(result, Err(ErrorCode::SIZE));
+        assert_eq!(buffer.payload(), b"");
+        assert_eq!(buffer.headroom(), 3);
+        assert_eq!(buffer.tailroom(), initial_tailroom);
+    }
+
+    #[test]
+    fn restore_headroom_and_tailroom_validate_runtime_state() {
+        let mut buffer = make_packet_buffer::<40>(4, &[(2, 5), (0, 5)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+
+        let buffer = buffer.prepend(b"[]");
+        let restored = match buffer.restore_previous_constraints() {
+            Ok(buffer) => buffer,
+            Err(_) => panic!("restore_previous_constraints should restore head constraints"),
+        };
+        assert_eq!(restored.payload(), b"[]abc");
+        assert_eq!(restored.headroom(), 2);
+        assert_eq!(restored.current_constraints, (2, 5));
+        assert_eq!(restored.constraint_index, 0);
+
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 7), (4, 5)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        let tailroom = buffer.tailroom();
+
+        let buffer = buffer.append(b"!!");
+        let restored = match buffer.restore_previous_constraints() {
+            Ok(buffer) => buffer,
+            Err(_) => panic!("restore_previous_constraints should restore tail constraints"),
+        };
+        assert_eq!(restored.payload(), b"abc!!");
+        assert_eq!(restored.tailroom(), tailroom - 2);
+        assert_eq!(restored.current_constraints, (4, 7));
+        assert_eq!(restored.constraint_index, 0);
+
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 5), (2, 5)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        let buffer = buffer.prepend(b"[]");
+        assert!(buffer.restore_previous_constraints().is_err());
+
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 9), (4, 7)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        let buffer = buffer.append(b"!!");
+        assert!(buffer.restore_previous_constraints().is_err());
+    }
+
+    #[test]
+    fn reclaim_headroom_and_tailroom_restore_space_when_valid() {
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 9), (2, 9)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+
+        let buffer = buffer.prepend(b"[]");
+        assert_eq!(buffer.payload(), b"[]abc");
+        let buffer = match buffer.reclaim_previous_constraints() {
+            Ok(buffer) => buffer,
+            Err(_) => panic!("reclaim_previous_constraints should reclaim head constraints"),
+        };
+        assert_eq!(buffer.payload(), b"abc");
+        assert_eq!(buffer.headroom(), 4);
+        assert_eq!(buffer.tailroom(), 9);
+        assert_eq!(buffer.current_constraints, (4, 9));
+
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 9), (4, 7)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        let buffer = buffer.append(b"!!");
+        assert_eq!(buffer.payload(), b"abc!!");
+        let buffer = match buffer.reclaim_previous_constraints() {
+            Ok(buffer) => buffer,
+            Err(_) => panic!("reclaim_previous_constraints should reclaim tail constraints"),
+        };
+        assert_eq!(buffer.payload(), b"abc");
+        assert_eq!(buffer.tailroom(), 9);
+        assert_eq!(buffer.current_constraints, (4, 9));
+    }
+
+    #[test]
+    fn reclaim_fails_when_requested_space_crosses_limits() {
+        let mut buffer = make_packet_buffer::<32>(3, &[(3, 4)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        assert!(buffer.reclaim_previous_constraints().is_err());
+    }
+
+    #[test]
+    fn reset_restores_empty_buffer_state() {
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 5), (2, 5), (2, 3)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        let mut buffer = buffer.prepend(b"[]").append(b"!!");
+
+        let capacity = buffer.capacity();
+        assert!(buffer.inner.reset(3));
+
+        assert_eq!(buffer.payload(), b"");
+        assert_eq!(buffer.headroom(), 3);
+        assert_eq!(buffer.tailroom(), capacity - 3);
+
+        let mut buffer = make_packet_buffer::<40>(4, &[(4, 5)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+        assert!(!buffer.inner.reset(capacity + 1));
+    }
+
+    #[test]
+    fn payload_mut_edits_payload_in_place() {
+        let mut buffer = make_packet_buffer::<32>(3, &[(3, 3)]);
+        buffer.copy_from_slice_or_err(b"abc").unwrap();
+
+        buffer.payload_mut()[1] = b'Z';
+
+        assert_eq!(buffer.payload(), b"aZc");
+    }
+
+    #[test]
+    fn downcast_recovers_packetslice_backend() {
+        let buffer = make_packet_buffer::<32>(3, &[(3, 3)]);
+        let packet_slice = buffer.downcast::<PacketSliceMut>().unwrap();
+
+        assert_eq!(packet_slice.get_headroom(), 3);
+        assert_eq!(packet_slice.get_tailroom(), 5);
+    }
+
+    #[test]
+    #[should_panic]
+    fn prepend_panics_when_headroom_contract_is_exceeded() {
+        let buffer = make_packet_buffer::<32>(1, &[(1, 3), (0, 3)]);
+        let _ = buffer.prepend(b"[]");
+    }
+
+    #[test]
+    #[should_panic]
+    fn append_panics_when_tailroom_contract_is_exceeded() {
+        let buffer = make_packet_buffer::<32>(3, &[(3, 1), (3, 0)]);
+        let _ = buffer.append(b"[]");
+    }
+
+    #[test]
+    fn packetslice_metadata_matches_expected_capacity() {
+        let buffer = make_packet_buffer::<32>(3, &[(3, 3)]);
+
+        assert_eq!(buffer.capacity(), 32 - METADATA_BYTES);
+    }
+}
